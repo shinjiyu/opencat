@@ -27,7 +27,31 @@ opencat/
 
 **协议优先**：所有 CS 交互必须严格遵守 [docs/protocol.md](docs/protocol.md)。修改协议须先更新文档。
 
-## 快速开始
+## 生产环境
+
+- **服务端地址**: `https://kuroneko.chat/opencat/`
+- **Chat UI**: `https://kuroneko.chat/opencat/chat?token=occ_xxx`
+- **API**: `https://kuroneko.chat/opencat/v1/chat/completions`
+- **Token 分配**: `POST https://kuroneko.chat/opencat/api/tokens`
+
+## 打包客户端
+
+```bash
+cd client/scripts
+
+# 打包单平台
+./build-portable.sh --platform win-x64 --server-url https://kuroneko.chat/opencat
+
+# 打包全平台
+./build-portable.sh --platform all --server-url https://kuroneko.chat/opencat
+
+# 打包全平台 + 预分配 Token（需要服务端运行）
+./build-portable.sh --platform all --server-url https://kuroneko.chat/opencat --pre-token
+```
+
+产出在 `dist/` 目录下。
+
+## 本地开发
 
 ```bash
 # 服务端
@@ -35,10 +59,6 @@ cd server
 cp .env.example .env    # 编辑 .env 配置上游 LLM
 npm install
 npm run dev
-
-# 打包客户端（示例：全平台）
-cd client
-./scripts/build-portable.sh --platform all --server-url https://your-server.com
 ```
 
 ## 文档
