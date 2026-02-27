@@ -14,7 +14,8 @@ export function getDb(): DbData {
   if (!_data) {
     mkdirSync(dirname(DB_PATH), { recursive: true });
     if (existsSync(DB_PATH)) {
-      _data = JSON.parse(readFileSync(DB_PATH, "utf-8"));
+      const raw = JSON.parse(readFileSync(DB_PATH, "utf-8"));
+      _data = { tokens: raw.tokens ?? {}, usage: raw.usage ?? {} };
     } else {
       _data = { tokens: {}, usage: {} };
       saveDb();
