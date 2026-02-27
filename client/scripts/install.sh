@@ -11,8 +11,8 @@ NODE="$SCRIPT_DIR/tools/node/bin/node"
 NPM="$SCRIPT_DIR/tools/node/bin/npm"
 APP_DIR="$SCRIPT_DIR/lib/app"
 
-# --- Server URL (injected at build time) ---
-SERVER_URL=${SERVER_URL:-https://kuroneko.chat/opencat}
+# --- Server URL (injected at build time; do not change this placeholder) ---
+SERVER_URL=${SERVER_URL:-https://proxy.example.com}
 
 ARCH="$(uname -m)"
 OS="$(uname -s)"
