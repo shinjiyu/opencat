@@ -37,6 +37,9 @@ app.route("/v1", proxyRoutes);
 app.use("/chat/*", serveStatic({ root: "./public" }));
 app.get("/chat", serveStatic({ root: "./public", path: "index.html" }));
 
+// Admin Dashboard (static page, auth happens client-side via API)
+app.get("/admin", serveStatic({ root: "./public", path: "admin.html" }));
+
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", protocol_version: "1.0.0" }));
 

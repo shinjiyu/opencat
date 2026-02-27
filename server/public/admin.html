@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCat Admin</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --bg: #f0f2f5; --card: #fff; --accent: #1976d2; --danger: #d32f2f; --success: #388e3c; --warn: #f57c00; --text: #1a1a1a; --muted: #666; --border: #e0e0e0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.header h1 { font-size: 22px; font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.stat-card { background: var(--card); border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.stat-card .label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.stat-card .value { font-size: 28px; font-weight: 700; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar select, .toolbar input { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--card); }
+.toolbar button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: var(--accent); color: #fff; }
+.toolbar button:hover { opacity: .9; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+th { background: #f5f5f5; text-align: left; padding: 12px 14px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+td { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+tr:hover td { background: #fafafa; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.badge-active { background: #e8f5e9; color: var(--success); }
+.badge-disabled { background: #ffebee; color: var(--danger); }
+.badge-exceeded { background: #fff3e0; color: var(--warn); }
+.token-text { font-family: "SF Mono", Monaco, monospace; font-size: 12px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.token-text:hover { color: var(--text); }
+.usage-bar { width: 100px; height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.usage-bar .fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.usage-bar .fill.green { background: var(--success); }
+.usage-bar .fill.orange { background: var(--warn); }
+.usage-bar .fill.red { background: var(--danger); }
+.actions button { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; cursor: pointer; background: var(--card); margin-right: 4px; }
+.actions button:hover { background: #f5f5f5; }
+.actions button.danger { color: var(--danger); border-color: var(--danger); }
+.actions button.success { color: var(--success); border-color: var(--success); }
+.pagination { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+.pagination button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); cursor: pointer; font-size: 13px; }
+.pagination button.current { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pagination button:disabled { opacity: .4; cursor: default; }
+.login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.login-box { background: var(--card); border-radius: 12px; padding: 32px; width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,.15); }
+.login-box h2 { margin-bottom: 20px; font-size: 18px; }
+.login-box input { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; margin-bottom: 16px; }
+.login-box button { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; }
+.login-box .error { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+.time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+@media (max-width: 768px) {
+  .container { padding: 12px; }
+  table { font-size: 13px; display: block; overflow-x: auto; }
+  th, td { padding: 8px 10px; }
+}
+</style>
+</head>
+<body>
+
+<div id="login-overlay" class="login-overlay">
+  <div class="login-box">
+    <h2>Admin Login</h2>
+    <div id="login-error" class="error" style="display:none"></div>
+    <input id="secret-input" type="password" placeholder="Admin Secret" autofocus>
+    <button onclick="doLogin()">登录</button>
+  </div>
+</div>
+
+<div class="container" id="app" style="display:none">
+  <div class="header">
+    <h1>OpenCat Admin</h1>
+    <button onclick="logout()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px">退出</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="toolbar">
+    <select id="filter-status" onchange="loadTokens()">
+      <option value="">全部状态</option>
+      <option value="active">Active</option>
+      <option value="disabled">Disabled</option>
+    </select>
+    <input id="filter-search" type="text" placeholder="搜索 Token / Platform..." oninput="renderTable()">
+    <button onclick="loadTokens()">刷新</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Token</th>
+        <th>状态</th>
+        <th>平台</th>
+        <th>今日用量</th>
+        <th>月用量</th>
+        <th>创建时间</th>
+        <th>最后使用</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <div class="pagination" id="pagination"></div>
+</div>
+
+<script>
+const pathPrefix = location.pathname.replace(/\/admin\/?$/, "");
+const API = location.origin + pathPrefix;
+let SECRET = localStorage.getItem("opencat_admin_secret") || "";
+let allTokens = [];
+let currentPage = 1;
+let totalPages = 1;
+
+if (SECRET) {
+  tryLoad();
+} else {
+  document.getElementById("login-overlay").style.display = "flex";
+}
+
+document.getElementById("secret-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") doLogin();
+});
+
+async function doLogin() {
+  SECRET = document.getElementById("secret-input").value.trim();
+  if (!SECRET) return;
+  const ok = await tryLoad();
+  if (ok) {
+    localStorage.setItem("opencat_admin_secret", SECRET);
+    document.getElementById("login-overlay").style.display = "none";
+    document.getElementById("app").style.display = "block";
+  } else {
+    const el = document.getElementById("login-error");
+    el.textContent = "Secret 无效，请重试";
+    el.style.display = "block";
+  }
+}
+
+function logout() {
+  localStorage.removeItem("opencat_admin_secret");
+  SECRET = "";
+  document.getElementById("app").style.display = "none";
+  document.getElementById("login-overlay").style.display = "flex";
+  document.getElementById("secret-input").value = "";
+}
+
+async function tryLoad() {
+  try {
+    const res = await fetch(API + "/api/admin/tokens?limit=200", {
+      headers: { "X-Admin-Secret": SECRET }
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    allTokens = data.tokens;
+    totalPages = Math.ceil(data.total / 200);
+    document.getElementById("login-overlay").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    renderStats();
+    renderTable();
+    return true;
+  } catch { return false; }
+}
+
+function loadTokens() {
+  tryLoad();
+}
+
+function renderStats() {
+  const total = allTokens.length;
+  const active = allTokens.filter(t => t.status === "active").length;
+  const disabled = allTokens.filter(t => t.status === "disabled").length;
+  const usedToday = allTokens.filter(t => t.quota.daily_used > 0).length;
+  const totalReqToday = allTokens.reduce((s, t) => s + t.quota.daily_used, 0);
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat-card"><div class="label">总 Token 数</div><div class="value">${total}</div></div>
+    <div class="stat-card"><div class="label">Active</div><div class="value" style="color:var(--success)">${active}</div></div>
+    <div class="stat-card"><div class="label">Disabled</div><div class="value" style="color:var(--danger)">${disabled}</div></div>
+    <div class="stat-card"><div class="label">今日活跃</div><div class="value" style="color:var(--accent)">${usedToday}</div></div>
+    <div class="stat-card"><div class="label">今日请求总数</div><div class="value">${totalReqToday}</div></div>
+  `;
+}
+
+function renderTable() {
+  const search = document.getElementById("filter-search").value.toLowerCase();
+  const statusFilter = document.getElementById("filter-status").value;
+
+  let filtered = allTokens;
+  if (statusFilter) filtered = filtered.filter(t => t.status === statusFilter);
+  if (search) filtered = filtered.filter(t =>
+    t.token.toLowerCase().includes(search) ||
+    t.platform.toLowerCase().includes(search) ||
+    (t.install_id || "").toLowerCase().includes(search) ||
+    (t.meta?.label || "").toLowerCase().includes(search) ||
+    (t.meta?.hostname || "").toLowerCase().includes(search)
+  );
+
+  const tbody = document.getElementById("tbody");
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">没有 Token</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(t => {
+    const dailyPct = t.quota.daily_limit ? Math.min(100, t.quota.daily_used / t.quota.daily_limit * 100) : 0;
+    const monthlyPct = t.quota.monthly_limit ? Math.min(100, t.quota.monthly_used / t.quota.monthly_limit * 100) : 0;
+    const barColor = pct => pct >= 90 ? "red" : pct >= 60 ? "orange" : "green";
+
+    const statusBadge = t.status === "active"
+      ? '<span class="badge badge-active">Active</span>'
+      : '<span class="badge badge-disabled">Disabled</span>';
+
+    const toggleBtn = t.status === "active"
+      ? `<button class="danger" onclick="toggleStatus('${t.token}','disabled')">禁用</button>`
+      : `<button class="success" onclick="toggleStatus('${t.token}','active')">启用</button>`;
+
+    const label = t.meta?.label || t.meta?.hostname || t.install_id?.slice(0, 8) || "";
+
+    return `<tr>
+      <td><div class="token-text" title="${t.token}" onclick="copyToken('${t.token}')">${t.token}</div><div style="font-size:11px;color:var(--muted)">${label}</div></td>
+      <td>${statusBadge}</td>
+      <td>${t.platform}</td>
+      <td><div class="usage-bar"><div class="fill ${barColor(dailyPct)}" style="width:${dailyPct}%"></div></div>${t.quota.daily_used}/${t.quota.daily_limit}</td>
+      <td><div class="usage-bar"><div class="fill ${barColor(monthlyPct)}" style="width:${monthlyPct}%"></div></div>${t.quota.monthly_used}/${t.quota.monthly_limit}</td>
+      <td class="time">${fmtTime(t.created_at)}</td>
+      <td class="time">${t.last_used_at ? fmtTime(t.last_used_at) : '<span style="color:#ccc">未使用</span>'}</td>
+      <td class="actions">${toggleBtn}<button class="danger" onclick="deleteToken('${t.token}')">删除</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function fmtTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function toggleStatus(token, status) {
+  await fetch(API + "/api/admin/tokens/" + token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-Admin-Secret": SECRET },
+    body: JSON.stringify({ status })
+  });
+  loadTokens();
+}
+
+async function deleteToken(token) {
+  if (!confirm("确定删除此 Token？删除后不可恢复。")) return;
+  await fetch(API + "/api/admin/tokens/" + token, {
+    method: "DELETE",
+    headers: { "X-Admin-Secret": SECRET }
+  });
+  loadTokens();
+}
+
+function copyToken(token) {
+  navigator.clipboard.writeText(token).then(() => {
+    const el = document.querySelector(`[title="${token}"]`);
+    if (el) { const orig = el.textContent; el.textContent = "已复制!"; setTimeout(() => el.textContent = orig, 1000); }
+  });
+}
+</script>
+</body>
+</html>
