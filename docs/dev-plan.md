@@ -1,6 +1,6 @@
-# 傻瓜版 OpenClaw — 开发计划
+# OpenCat — 开发计划
 
-基于 [portable-and-offline-deployment.md](./portable-and-offline-deployment.md) 中确认的方案。
+基于 [design.md](./design.md) 中确认的方案。
 
 ---
 
@@ -10,184 +10,141 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  用户电脑（客户端）                                           │
 │                                                              │
-│  ┌──────────────┐     install.bat/ps1                        │
+│  ┌──────────────┐     install.bat/sh                         │
 │  │ Node (便携)  │ ──→ npm install (装依赖)                   │
-│  │ + OpenClaw   │ ──→ POST /api/tokens (要 Token)            │
-│  │   (代码/包)  │ ──→ 写入 openclaw.json + 聊天链接          │
+│  │ + 应用代码   │ ──→ POST /api/tokens (要 Token)            │
 │  └──────┬───────┘                                            │
-│         │ 运行后                                              │
+│         │ 安装后                                              │
 │         ▼                                                    │
-│  openclaw gateway  ──→  LLM 请求带 Token                     │
-│                                                              │
-│  浏览器 ──→ https://proxy.example.com/chat?token=xxx         │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ HTTPS
-                           ▼
+│  浏览器打开 chat_url  ──→  LLM 请求带 Token                  │
+└──────────────┬───────────────────────────────────────────────┘
+               │ HTTPS
+               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  服务端                                                       │
+│  运营方服务器                                                 │
 │                                                              │
-│  ┌─────────────┐   ┌──────────────┐   ┌──────────────────┐  │
-│  │  Token API  │   │  LLM 代理    │   │  聊天 Web UI     │  │
-│  │  (分配/管理)│   │  (转发+限流) │   │  (仅聊天功能)    │  │
-│  └──────┬──────┘   └──────┬───────┘   └──────────────────┘  │
-│         │                 │                                  │
-│         ▼                 ▼                                  │
-│       ┌─────────────────────┐                                │
-│       │     数据库 (DB)     │  tokens / usage / quota        │
-│       └─────────────────────┘                                │
-│                │                                             │
-│                ▼                                             │
-│       上游 LLM (OpenRouter / Anthropic / OpenAI / ...)       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Token 服务   │  │ LLM 代理     │  │ Chat Web UI  │       │
+│  │ /api/tokens  │  │ /v1/chat/... │  │ /chat        │       │
+│  └──────┬───────┘  └──────┬───────┘  └──────────────┘       │
+│         │                 │                                   │
+│    ┌────▼────┐      ┌─────▼─────┐                            │
+│    │  数据库  │      │ 上游 LLM  │                            │
+│    │ SQLite  │      │ Provider  │                            │
+│    └─────────┘      └───────────┘                            │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 开发步骤
+## 开发阶段
 
 ### Phase 0: 协议设计（CS 协议 + API 接口规范）
 
-**不写代码，只出文档**。后续所有开发以此为合约。
+**产出**: `docs/protocol.md`
 
-| 接口 | 方向 | 说明 |
-|------|------|------|
-| `POST /api/tokens` | install 脚本 → 服务端 | 分配新 Token；请求体可含 `platform`、`install_id`、`meta`；返回 `{ token, chat_url, proxy_base_url }` |
-| `GET  /api/tokens/:token/status` | 客户端 → 服务端 | 查询 Token 状态（有效/禁用/配额剩余）；可选，用于 install 后校验或客户端健康检查 |
-| `POST /v1/chat/completions` | OpenClaw → LLM 代理 | OpenAI 兼容聊天接口；`Authorization: Bearer <token>`；代理校验 Token 后转发上游 LLM |
-| `GET  /chat?token=xxx` | 浏览器 → Web UI | 聊天页；从 URL 取 Token，前端请求 `/v1/chat/completions` 时带同一 Token |
-| `POST /api/admin/tokens` | 管理后台 → 服务端 | 管理接口：列出/禁用/调整配额/删除 Token（内部使用，需管理员鉴权） |
-
-交付物：
-
-- [ ] **协议文档**：接口 URL、请求/响应格式（JSON Schema 或示例）、错误码、鉴权方式、限流规则
-- [ ] **数据模型**：`tokens` 表结构（`token`, `created_at`, `disabled`, `quota_daily`, `usage_today`, `meta` 等）
-- [ ] **聊天 WebSocket/SSE 协议**：Web UI 与代理之间的流式响应约定（SSE `text/event-stream` 或 WebSocket）
-
----
+- [x] 定义 Token 分配接口 (`POST /api/tokens`)
+- [x] 定义 Token 状态查询接口 (`GET /api/tokens/:token/status`)
+- [x] 定义 LLM 代理接口 (`POST /v1/chat/completions`, OpenAI 兼容)
+- [x] 定义模型列表接口 (`GET /v1/models`)
+- [x] 定义管理接口 (`/api/admin/*`)
+- [x] 定义 Web UI 页面接口 (`GET /chat`)
+- [x] 定义数据模型 (tokens 表 + usage 表)
+- [x] 定义限流规则
+- [x] 定义鉴权机制 (Bearer Token + Admin Secret)
+- [x] 定义 SSE 流式传输格式
 
 ### Phase 1: 服务端 — Token 服务 + 数据库
 
-**目标**：能分配 Token、入库、查询状态。
+**产出**: `server/src/db/`, `server/src/routes/tokens.ts`
 
-- [ ] 选型：运行时（Node/Bun/Python）、框架（Express/Fastify/Hono 等）、数据库（SQLite 起步 / PostgreSQL）
-- [ ] 实现 `POST /api/tokens`：生成 UUID Token → 写库 → 返回 `{ token, chat_url, proxy_base_url }`
-- [ ] 实现 `GET /api/tokens/:token/status`：查库返回状态
-- [ ] 实现管理接口 `POST /api/admin/tokens`：列出 / 禁用 / 调整配额
-- [ ] 数据库 migration 脚本
-- [ ] 基础测试
-
----
+- [x] SQLite 数据库初始化 (tokens + usage 表)
+- [x] Token 生成与分配 (`occ_` + 32 hex)
+- [x] Token CRUD 操作
+- [x] 配额查询 (日/月用量)
+- [x] 用量记录与递增
 
 ### Phase 2: 服务端 — LLM 代理（转发 + 限流）
 
-**目标**：收到带 Token 的 `/v1/chat/completions` 请求后，校验 → 限流 → 转发上游 LLM → 流式返回。
+**产出**: `server/src/routes/proxy.ts`, `server/src/middleware/auth.ts`
 
-- [ ] 实现 `POST /v1/chat/completions`：
-  - 从 `Authorization: Bearer <token>` 取 Token
-  - 查库校验 Token 有效性
-  - 检查该 Token 配额/限流（如每日 N 条、每分钟 M 条）
-  - 转发到上游 LLM（初期可用 OpenRouter 或 LiteLLM）
-  - 流式（SSE）返回给客户端
-  - 扣量/计数写库
-- [ ] 超限时返回清晰错误（HTTP 429 + 提示信息）
-- [ ] 上游 LLM 配置（环境变量：上游 baseUrl、上游 API Key）
-- [ ] 基础测试（curl / Postman 模拟请求）
-
----
+- [x] Token 鉴权中间件
+- [x] 配额检查 (日/月限额)
+- [x] 上游 LLM 请求转发
+- [x] SSE 流式响应透传
+- [x] 非流式响应处理
+- [x] 用量统计
+- [ ] 每分钟滑动窗口限流（待实现）
 
 ### Phase 3: 服务端 — 聊天 Web UI
 
-**目标**：一个简洁的网页聊天界面，只做聊天，不做 OpenClaw 完整配置。
+**产出**: `server/public/index.html`
 
-- [ ] 单页应用（HTML + JS，或轻量框架如 Vue/React）
-- [ ] 从 URL `?token=xxx` 读取 Token
-- [ ] 输入框 → 调用 `/v1/chat/completions`（带 Token）→ 流式显示回复
-- [ ] 基本 UI：消息列表、Markdown 渲染、加载状态、错误提示
-- [ ] 部署：与代理同域同端口（或同一反向代理下），如 `/chat` 路径
-- [ ] 移动端适配（响应式布局）
+- [x] 简洁聊天界面
+- [x] URL Token 读取
+- [x] SSE 流式消息渲染
+- [x] 错误提示
+- [ ] Markdown 渲染（待实现）
+- [ ] 消息历史持久化（待实现）
 
----
+### Phase 4: 客户端 — 打包脚本
 
-### Phase 4: 客户端 — 打包脚本（按平台打 zip）
+**产出**: `client/scripts/build-portable.sh`
 
-**目标**：产出按平台的安装 zip（Node + OpenClaw 代码 + install 脚本）。
+- [x] 多平台 Node.js 下载与打包
+- [x] 应用代码打包
+- [x] install 脚本注入 server URL
+- [x] `--platform all` 全平台一键打包
+- [x] `--pre-token` 预分配 Token
+- [x] Node.js 下载缓存
 
-- [ ] 打包脚本（如 `scripts/build-portable.sh` 或 `.js`）：
-  - 参数：目标平台（`win-x64`、`darwin-arm64`、`darwin-x64`、`linux-x64`）
-  - 下载对应平台的 Node 便携版（从 nodejs.org）
-  - 复制 OpenClaw 代码/包（不含 `node_modules`）
-  - 放入 install 脚本（`install.bat` / `install.ps1` / `install.sh`）
-  - 打 zip，输出如 `openclaw-portable-win-x64-<version>.zip`
-- [ ] CI 集成（可选：GitHub Actions 产出多平台 zip 并上传到 release/CDN）
+### Phase 5: 客户端 — 安装脚本
 
----
+**产出**: `client/scripts/install.sh`, `client/scripts/install.bat`
 
-### Phase 5: 客户端 — install 脚本
+- [x] Windows BAT 安装脚本
+- [x] macOS/Linux Shell 安装脚本
+- [x] 自动 npm install 依赖
+- [x] 自动请求 Token
+- [x] 自动写入配置
+- [x] 生成聊天快捷方式
 
-**目标**：用户解压后运行 install，完成「装依赖 + 要 Token + 写配置 + 生成聊天链接」。
+### Phase 6: 集成测试 + E2E 验证
 
-- [ ] `install.bat`（Windows）/ `install.ps1` / `install.sh`（macOS/Linux）：
-  1. 检测包内 Node 可用（`tools/node/node --version`）
-  2. 用包内 Node 执行 `npm install --omit=dev`（在 OpenClaw 目录下安装依赖）
-  3. 向服务端 `POST /api/tokens` 请求新 Token（用包内 Node 或 curl/PowerShell 发 HTTPS 请求）
-  4. 将返回的 Token 写入 `openclaw.json`（设置 `models.providers` 的 `baseUrl` + `apiKey`）
-  5. 生成「打开聊天」链接/快捷方式（如 `chat.url` 或 `chat.html` 跳转到 `https://proxy.example.com/chat?token=xxx`）
-  6. 输出提示：安装完成、如何启动、聊天链接
-- [ ] 错误处理：网络不通、npm install 失败、Token 请求失败等的友好提示
-- [ ] 可选：`openclaw.bat` / `openclaw.sh` 启动脚本（设 PATH 并启动 gateway）
-
----
-
-### Phase 6: 集成测试 + 端到端验证
-
-**目标**：在干净环境下走通全流程。
-
-- [ ] 准备一台干净 Windows（无 Node、无 Git）+ 一台 macOS
-- [ ] 全流程：下载 zip → 解压 → 运行 install → Token 分配成功 → 打开聊天链接 → 发消息 → 收到 LLM 回复
-- [ ] 验证：Token 限流生效（超限返回 429）；禁用 Token 后无法使用
-- [ ] 验证：同一 Token 多设备/多浏览器打开聊天均可用
-- [ ] 修复发现的问题
-
----
+- [ ] 服务端启动 → Token 分配 → 代理转发 E2E
+- [ ] 打包 → 解压 → install → 聊天 全流程
+- [ ] Windows 平台测试（CI 或虚拟机）
+- [ ] 错误场景测试（无网络、Token 过期、配额超限）
 
 ### Phase 7: 文档 + 发布
 
-- [ ] 用户文档：下载页说明、install 步骤、常见问题
-- [ ] 运维文档：服务端部署、上游 LLM 配置、Token 管理、监控
-- [ ] 下载页（openclaw.ai 或独立页面）：按平台提供 zip 下载链接
-- [ ] 发布第一批安装包
+- [ ] 运营方部署文档
+- [ ] 用户使用说明
+- [ ] 常见问题 FAQ
 
 ---
 
-## 依赖关系
+## 阶段依赖
 
 ```
-Phase 0 (协议)
-    │
-    ├──→ Phase 1 (Token 服务) ──→ Phase 2 (LLM 代理) ──→ Phase 3 (Web UI)
-    │                                                          │
-    └──→ Phase 4 (打包脚本) ──→ Phase 5 (install 脚本) ────────┘
-                                                               │
-                                                               ▼
-                                                    Phase 6 (集成测试)
-                                                               │
-                                                               ▼
-                                                    Phase 7 (文档+发布)
+Phase 0 (协议) ──→ Phase 1 (Token) ──→ Phase 2 (代理) ──→ Phase 3 (Web UI)
+                                                              │
+Phase 0 ──→ Phase 4 (打包) ──→ Phase 5 (安装)                │
+                                                              │
+                      Phase 6 (集成测试) ←────────────────────┘
+                              │
+                      Phase 7 (文档+发布)
 ```
-
-- **Phase 0 必须先完成**（协议是所有 CS 交互的合约）。
-- Phase 1~3（服务端）和 Phase 4~5（客户端）可以**并行开发**，因为双方按 Phase 0 的协议各自实现。
-- Phase 6 在两边都完成后做集成。
 
 ---
 
-## 技术选型建议（可讨论）
+## 技术栈
 
-| 组件 | 建议 | 理由 |
-|------|------|------|
-| 服务端运行时 | Node / Bun | 与 OpenClaw 同栈，复用能力 |
-| 服务端框架 | Hono / Fastify | 轻量、支持 SSE/流式 |
-| 数据库 | SQLite（起步）→ PostgreSQL（规模化） | SQLite 零运维，单文件即可；后期可迁移 |
-| LLM 上游 | OpenRouter（初期，一个 Key 多模型） | 国内可直连、有免费模型 |
-| Web UI | 单页 HTML + vanilla JS 或 Vue | 只做聊天，越简单越好 |
-| 打包脚本 | Shell + Node 脚本 | 跨平台打包，CI 友好 |
+| 组件 | 技术选型 |
+|------|----------|
+| 服务端框架 | Hono (Node.js) |
+| 数据库 | SQLite (better-sqlite3) |
+| 上游 LLM | 可配置（OpenRouter / 自有 API） |
+| Web UI | 纯 HTML + JS（无框架） |
+| 打包 | Bash 脚本 + zip |
+| 安装 | BAT (Windows) / Shell (macOS/Linux) |

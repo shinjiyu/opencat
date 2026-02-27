@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-portable-server",
+  "name": "opencat-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,6 @@
   "dependencies": {
     "@hono/node-server": "^1.0.0",
     "better-sqlite3": "^11.0.0",
-    "dotenv": "^17.3.1",
     "hono": "^4.0.0"
   },
   "devDependencies": {

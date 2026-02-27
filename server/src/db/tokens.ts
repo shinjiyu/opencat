@@ -24,7 +24,7 @@ export interface UsageRecord {
 }
 
 export function generateToken(): string {
-  return "ocp_" + randomBytes(16).toString("hex");
+  return "occ_" + randomBytes(16).toString("hex");
 }
 
 export function createToken(params: {

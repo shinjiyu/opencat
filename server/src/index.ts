@@ -51,7 +51,7 @@ initDb(db);
 console.log(`Database initialized`);
 
 serve({ fetch: app.fetch, port, hostname: host }, (info) => {
-  console.log(`OpenClaw Portable Server listening on http://${host}:${info.port}`);
+  console.log(`OpenCat Server listening on http://${host}:${info.port}`);
   console.log(`  Chat UI:  http://localhost:${info.port}/chat`);
   console.log(`  API:      http://localhost:${info.port}/v1/chat/completions`);
   console.log(`  Tokens:   http://localhost:${info.port}/api/tokens`);

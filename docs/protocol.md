@@ -1,8 +1,8 @@
-# OpenClaw Portable — CS 协议规范
+# OpenCat — CS 协议规范
 
 > **版本**: 1.0.0  
 > **状态**: 草案  
-> **约束**: 客户端（install 脚本、OpenClaw 运行时）和服务端（Token 服务、LLM 代理、Web UI）的所有交互**必须严格遵守本协议**。任何修改须先更新本文档并通知双方。
+> **约束**: 客户端（install 脚本、运行时）和服务端（Token 服务、LLM 代理、Web UI）的所有交互**必须严格遵守本协议**。任何修改须先更新本文档并通知双方。
 
 ---
 
@@ -12,7 +12,7 @@
 客户端                                     服务端
 ──────                                     ──────
 install 脚本  ── POST /api/tokens ──────→  Token 服务（分配 + 入库）
-OpenClaw CLI  ── POST /v1/chat/completions → LLM 代理（校验 + 限流 + 转发）
+客户端 CLI   ── POST /v1/chat/completions → LLM 代理（校验 + 限流 + 转发）
 浏览器        ── GET  /chat?token=xxx ───→  Web UI（聊天页面）
 浏览器 (JS)   ── POST /v1/chat/completions → LLM 代理（同上）
 管理员        ── /api/admin/* ───────────→  管理接口（内部使用）
@@ -30,10 +30,10 @@ OpenClaw CLI  ── POST /v1/chat/completions → LLM 代理（校验 + 限流 
 
 ### 2.1 用户 Token（Bearer Token）
 
-- 由 `POST /api/tokens` 分配，格式为 **`ocp_` + 32 位随机 hex**（共 36 字符），例如 `ocp_a1b2c3d4e5f6...`。
+- 由 `POST /api/tokens` 分配，格式为 **`occ_` + 32 位随机 hex**（共 36 字符），例如 `occ_a1b2c3d4e5f6...`。
 - 客户端在所有 LLM 代理请求中通过以下方式之一携带 Token：
-  - **HTTP Header**（推荐）：`Authorization: Bearer ocp_xxx`
-  - **URL 参数**（仅 Web UI 打开页面时）：`?token=ocp_xxx`
+  - **HTTP Header**（推荐）：`Authorization: Bearer occ_xxx`
+  - **URL 参数**（仅 Web UI 打开页面时）：`?token=occ_xxx`
 - 服务端必须同时支持两种方式；Header 优先于 URL 参数。
 
 ### 2.2 管理员鉴权
@@ -58,7 +58,7 @@ Content-Type: application/json
 {
   "platform": "win-x64",          // 必填: win-x64 | darwin-arm64 | darwin-x64 | linux-x64
   "install_id": "uuid-string",    // 必填: 客户端本地生成的安装实例 UUID
-  "version": "2026.2.27",         // 必填: OpenClaw 版本
+  "version": "1.0.0",             // 必填: 客户端版本
   "meta": {                       // 可选: 额外信息
     "hostname": "USER-PC",
     "label": "张三的电脑"
@@ -70,8 +70,8 @@ Content-Type: application/json
 
 ```json
 {
-  "token": "ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890",
-  "chat_url": "https://proxy.example.com/chat?token=ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890",
+  "token": "occ_a1b2c3d4e5f67890a1b2c3d4e5f67890",
+  "chat_url": "https://proxy.example.com/chat?token=occ_a1b2c3d4e5f67890a1b2c3d4e5f67890",
   "proxy_base_url": "https://proxy.example.com/v1",
   "quota": {
     "daily_limit": 100,
@@ -109,14 +109,14 @@ Content-Type: application/json
 **请求**：
 
 ```http
-GET /api/tokens/ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890/status HTTP/1.1
+GET /api/tokens/occ_a1b2c3d4e5f67890a1b2c3d4e5f67890/status HTTP/1.1
 ```
 
 **成功响应**（`200 OK`）：
 
 ```json
 {
-  "token": "ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890",
+  "token": "occ_a1b2c3d4e5f67890a1b2c3d4e5f67890",
   "status": "active",
   "quota": {
     "daily_limit": 100,
@@ -148,14 +148,14 @@ GET /api/tokens/ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890/status HTTP/1.1
 
 ### 3.3 `POST /v1/chat/completions` — LLM 聊天（OpenAI 兼容）
 
-**用途**：OpenClaw 或 Web UI 发起聊天请求；代理校验 Token 后转发上游 LLM。
+**用途**：客户端或 Web UI 发起聊天请求；代理校验 Token 后转发上游 LLM。
 
 **请求**（与 OpenAI Chat Completions API 兼容）：
 
 ```http
 POST /v1/chat/completions HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890
+Authorization: Bearer occ_a1b2c3d4e5f67890a1b2c3d4e5f67890
 
 {
   "model": "auto",
@@ -173,7 +173,7 @@ Authorization: Bearer ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `model` | string | 是 | 模型标识；`"auto"` 由代理选择默认模型；也可指定如 `"gpt-4o"`、`"claude-sonnet-4-5"`（代理映射到上游） |
+| `model` | string | 是 | 模型标识；`"auto"` 由代理选择默认模型；也可指定具体模型名（代理映射到上游） |
 | `messages` | array | 是 | 消息数组，格式与 OpenAI 一致 |
 | `stream` | boolean | 否 | 是否流式返回；默认 `true` |
 | `temperature` | number | 否 | 温度参数 |
@@ -182,7 +182,7 @@ Authorization: Bearer ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890
 **model 映射规则**：
 
 - `"auto"` → 代理配置的默认模型
-- 其他值 → 代理在上游 provider（如 OpenRouter）中查找对应模型；找不到则返回 400
+- 其他值 → 代理在上游 provider 中查找对应模型；找不到则返回 400
 
 **非流式响应**（`stream: false`，`200 OK`）：
 
@@ -191,7 +191,7 @@ Authorization: Bearer ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890
   "id": "chatcmpl-xxx",
   "object": "chat.completion",
   "created": 1740650000,
-  "model": "openrouter/deepseek/deepseek-chat:free",
+  "model": "deepseek/deepseek-chat",
   "choices": [
     {
       "index": 0,
@@ -213,13 +213,13 @@ Authorization: Bearer ocp_a1b2c3d4e5f67890a1b2c3d4e5f67890
 **流式响应**（`stream: true`，`200 OK`，`Content-Type: text/event-stream`）：
 
 ```
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"openrouter/deepseek/deepseek-chat:free","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"deepseek/deepseek-chat","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"openrouter/deepseek/deepseek-chat:free","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"deepseek/deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"openrouter/deepseek/deepseek-chat:free","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"deepseek/deepseek-chat","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"openrouter/deepseek/deepseek-chat:free","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1740650000,"model":"deepseek/deepseek-chat","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 ```
@@ -263,7 +263,7 @@ data: [DONE]
 **请求**：
 
 ```http
-GET /chat?token=ocp_xxx HTTP/1.1
+GET /chat?token=occ_xxx HTTP/1.1
 ```
 
 **行为**：
@@ -276,13 +276,13 @@ GET /chat?token=ocp_xxx HTTP/1.1
 
 ### 3.5 `GET /v1/models` — 可用模型列表
 
-**用途**：OpenClaw 或 Web UI 查询当前代理支持的模型。
+**用途**：客户端或 Web UI 查询当前代理支持的模型。
 
 **请求**：
 
 ```http
 GET /v1/models HTTP/1.1
-Authorization: Bearer ocp_xxx
+Authorization: Bearer occ_xxx
 ```
 
 **成功响应**（`200 OK`）：
@@ -300,11 +300,6 @@ Authorization: Bearer ocp_xxx
       "id": "deepseek-chat",
       "object": "model",
       "owned_by": "deepseek"
-    },
-    {
-      "id": "claude-sonnet-4-5",
-      "object": "model",
-      "owned_by": "anthropic"
     }
   ]
 }
@@ -331,7 +326,7 @@ X-Admin-Secret: <secret>
 {
   "tokens": [
     {
-      "token": "ocp_a1b2...",
+      "token": "occ_a1b2...",
       "status": "active",
       "platform": "win-x64",
       "install_id": "uuid-xxx",
@@ -351,7 +346,7 @@ X-Admin-Secret: <secret>
 **请求**：
 
 ```http
-PATCH /api/admin/tokens/ocp_a1b2... HTTP/1.1
+PATCH /api/admin/tokens/occ_a1b2... HTTP/1.1
 X-Admin-Secret: <secret>
 Content-Type: application/json
 
@@ -372,7 +367,7 @@ Content-Type: application/json
 **请求**：
 
 ```http
-DELETE /api/admin/tokens/ocp_a1b2... HTTP/1.1
+DELETE /api/admin/tokens/occ_a1b2... HTTP/1.1
 X-Admin-Secret: <secret>
 ```
 
@@ -386,11 +381,11 @@ X-Admin-Secret: <secret>
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `token` | TEXT PRIMARY KEY | Token 值（`ocp_` + 32 hex） |
+| `token` | TEXT PRIMARY KEY | Token 值（`occ_` + 32 hex） |
 | `status` | TEXT NOT NULL DEFAULT 'active' | `active` / `disabled` |
 | `platform` | TEXT NOT NULL | `win-x64` / `darwin-arm64` / `darwin-x64` / `linux-x64` |
 | `install_id` | TEXT NOT NULL | 客户端安装实例 UUID |
-| `version` | TEXT | OpenClaw 版本号 |
+| `version` | TEXT | 客户端版本号 |
 | `daily_limit` | INTEGER NOT NULL DEFAULT 100 | 每日请求上限 |
 | `monthly_limit` | INTEGER NOT NULL DEFAULT 3000 | 每月请求上限 |
 | `meta` | TEXT | JSON 格式的额外信息 |
@@ -443,7 +438,7 @@ X-Admin-Secret: <secret>
     │
     ├─ 4. npm install --omit=dev (用包内 Node 安装依赖)
     │
-    ├─ 5. 写入 openclaw.json:
+    ├─ 5. 写入配置文件:
     │     models.providers.proxy = {
     │       baseUrl: proxy_base_url,
     │       apiKey: token,
@@ -451,7 +446,7 @@ X-Admin-Secret: <secret>
     │       models: [{ id: "auto", name: "Auto" }]
     │     }
     │
-    ├─ 6. 生成 chat.html / chat.url (快捷方式)
+    ├─ 6. 生成 open-chat.html (快捷方式)
     │     指向 chat_url
     │
     └─ 7. 输出安装完成提示
@@ -465,7 +460,7 @@ X-Admin-Secret: <secret>
 用户点击 chat_url (浏览器打开)
     │
     ▼
-GET /chat?token=ocp_xxx
+GET /chat?token=occ_xxx
     │
     ▼
 浏览器加载聊天页面
@@ -475,7 +470,7 @@ GET /chat?token=ocp_xxx
     ├─ 用户输入消息
     │
     ├─ POST /v1/chat/completions
-    │   Header: Authorization: Bearer ocp_xxx
+    │   Header: Authorization: Bearer occ_xxx
     │   Body: { model: "auto", messages: [...], stream: true }
     │
     ├─ 代理校验 Token → 查库 → 检查限流

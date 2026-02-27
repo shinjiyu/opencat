@@ -1,11 +1,11 @@
-# OpenClaw Portable
+# OpenCat
 
-傻瓜版 OpenClaw 部署系统 —— 让用户「解压 → install → 打开链接即聊天」。
+一键部署 AI 聊天系统 —— 让用户「解压 → install → 打开链接即聊天」。
 
 ## 项目结构
 
 ```
-openclaw-portable/
+opencat/
 ├── docs/
 │   ├── protocol.md      # CS 协议规范（所有开发必须遵守）
 │   ├── design.md        # 方案设计文档
@@ -32,12 +32,13 @@ openclaw-portable/
 ```bash
 # 服务端
 cd server
+cp .env.example .env    # 编辑 .env 配置上游 LLM
 npm install
 npm run dev
 
-# 打包客户端（示例：Windows x64）
+# 打包客户端（示例：全平台）
 cd client
-./scripts/build-portable.sh --platform win-x64
+./scripts/build-portable.sh --platform all --server-url https://your-server.com
 ```
 
 ## 文档

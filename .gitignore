@@ -3,4 +3,6 @@ dist/
 server/data/
 server/.env
 *.tgz
+*.db
+token.json
 .DS_Store
