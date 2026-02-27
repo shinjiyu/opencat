@@ -10,92 +10,129 @@ set "SCRIPT_DIR=%~dp0"
 set "NODE=%SCRIPT_DIR%tools\node\node.exe"
 set "NPM=%SCRIPT_DIR%tools\node\npm.cmd"
 set "APP_DIR=%SCRIPT_DIR%lib\app"
+set "CLOUDFLARED=%SCRIPT_DIR%tools\cloudflared\cloudflared.exe"
 set "LOG_FILE=%SCRIPT_DIR%install.log"
-
-rem --- Server URL (injected at build time; do not change this placeholder) ---
-set "SERVER_URL=https://proxy.example.com"
+set "OPENCLAW_PORT=3080"
 
 rem --- Start install log ---
 echo [OpenCat Install] %date% %time% > "%LOG_FILE%"
-echo Server URL: !SERVER_URL! >> "%LOG_FILE%"
 
-:: Check if already configured (pre-token mode)
-if exist "%APP_DIR%\opencat.json" (
-    echo [INFO] Config already exists - pre-configured package detected.
-    echo [INFO] Skipping token request. Running npm install only.
-    echo Pre-configured, skipping token request >> "%LOG_FILE%"
-    goto :install_deps
-)
-
-:: Check Node exists
-if not exist "%NODE%" (
-    echo ERROR: Node not found at %NODE%
-    echo ERROR: Node not found at %NODE% >> "%LOG_FILE%"
-    echo Please re-download the portable package for your platform.
+:: Must be a pre-configured package
+if not exist "%APP_DIR%\opencat.json" (
+    echo ERROR: This package is not pre-configured.
+    echo ERROR: not pre-configured >> "%LOG_FILE%"
+    echo Please use an officially distributed package.
     pause
     exit /b 1
 )
 
-echo [1/4] Checking Node...
-echo [1/4] Checking Node >> "%LOG_FILE%"
+if not exist "%SCRIPT_DIR%token.json" (
+    echo ERROR: token.json not found.
+    echo ERROR: token.json not found >> "%LOG_FILE%"
+    pause
+    exit /b 1
+)
+
+if not exist "%NODE%" (
+    echo ERROR: Node not found at %NODE%
+    echo ERROR: Node not found >> "%LOG_FILE%"
+    pause
+    exit /b 1
+)
+
+:: Read token and server URL from token.json
+for /f "usebackq delims=" %%a in (`"%NODE%" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(t.token)" "%SCRIPT_DIR%token.json"`) do set "TOKEN=%%a"
+for /f "usebackq delims=" %%a in (`"%NODE%" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(t.chat_url)" "%SCRIPT_DIR%token.json"`) do set "CHAT_URL=%%a"
+for /f "usebackq delims=" %%a in (`"%NODE%" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const u=new URL(t.chat_url);console.log(u.origin+u.pathname.replace(/\/chat$/,''))" "%SCRIPT_DIR%token.json"`) do set "SERVER_BASE=%%a"
+
+echo [1/5] Checking Node...
+echo [1/5] Checking Node >> "%LOG_FILE%"
 "%NODE%" --version
 echo.
 
-:install_deps
-echo [2/4] Installing dependencies...
-echo [2/4] Installing dependencies >> "%LOG_FILE%"
+echo [2/5] Installing dependencies...
+echo [2/5] Installing dependencies >> "%LOG_FILE%"
 cd /d "%APP_DIR%"
-"%NPM%" install --omit=dev
-if errorlevel 1 (
+call "%NPM%" install --omit=dev --ignore-scripts
+set "NPM_ERR=!errorlevel!"
+cd /d "%SCRIPT_DIR%"
+if !NPM_ERR! neq 0 (
     echo ERROR: npm install failed.
     echo ERROR: npm install failed >> "%LOG_FILE%"
-    echo Check your network connection and try again.
     pause
     exit /b 1
 )
+echo [2/5] Done.
 echo.
 
-:: Skip token if pre-configured
-if exist "%APP_DIR%\opencat.json" (
-    echo [3/4] Skipped (pre-configured).
-    echo [4/4] Skipped (pre-configured).
-    goto :done
+echo [3/5] Starting OpenClaw...
+echo [3/5] Starting OpenClaw >> "%LOG_FILE%"
+start "OpenClaw" cmd /c "cd /d \"%APP_DIR%\" && \"%NPM%\" start"
+echo     Waiting for OpenClaw to start...
+timeout /t 3 /nobreak >nul
+echo [3/5] Done.
+echo.
+
+echo [4/5] Starting tunnel...
+echo [4/5] Starting tunnel >> "%LOG_FILE%"
+if not exist "%CLOUDFLARED%" (
+    echo WARN: cloudflared not found at %CLOUDFLARED%
+    echo WARN: cloudflared not found >> "%LOG_FILE%"
+    echo     Skipping tunnel. You can manually set up a tunnel later.
+    goto :show_result
 )
 
-echo [3/4] Requesting Token from server...
-echo [INFO] Server URL: !SERVER_URL!
-echo [3/4] Requesting Token from server >> "%LOG_FILE%"
-for /f %%i in ('powershell -Command "[guid]::NewGuid().ToString()"') do set "INSTALL_ID=%%i"
-echo [INFO] Install ID: !INSTALL_ID!
-echo Install ID: !INSTALL_ID! >> "%LOG_FILE%"
+set "TUNNEL_LOG=%SCRIPT_DIR%cloudflared.log"
+start "Cloudflared" cmd /c "\"%CLOUDFLARED%\" tunnel --url http://127.0.0.1:%OPENCLAW_PORT% > \"%TUNNEL_LOG%\" 2>&1"
+echo     Waiting for tunnel URL...
 
-"%NODE%" -e "const h=require(!SERVER_URL!.startsWith('https')?'https':'http');const url=!SERVER_URL!+'/api/tokens';const data=JSON.stringify({platform:'win-x64',install_id:'!INSTALL_ID!',version:'portable'});const u=new URL(url);const req=h.request(u,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}},(res)=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>{if(res.statusCode===200){const r=JSON.parse(body);const fs=require('fs');fs.writeFileSync('%SCRIPT_DIR%token.json',body);console.log('Token: '+r.token);console.log('Chat URL: '+r.chat_url)}else{console.error('Failed: '+body);process.exit(1)}})});req.on('error',e=>{console.error('Network error: '+e.message);process.exit(1)});req.write(data);req.end()"
-if errorlevel 1 (
-    echo ERROR: Failed to get token from server.
-    echo ERROR: Failed to get token from server >> "%LOG_FILE%"
-    pause
-    exit /b 1
-)
+set "TUNNEL_URL="
+set "RETRY=0"
+:wait_tunnel
+if !RETRY! geq 30 goto :tunnel_timeout
+timeout /t 1 /nobreak >nul
+set /a RETRY+=1
+for /f "usebackq tokens=*" %%a in (`"%NODE%" -e "const fs=require('fs');try{const l=fs.readFileSync(process.argv[1],'utf8');const m=l.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);if(m)console.log(m[0])}catch(e){}" "%TUNNEL_LOG%"`) do set "TUNNEL_URL=%%a"
+if "!TUNNEL_URL!"=="" goto :wait_tunnel
+
+echo     Tunnel URL: !TUNNEL_URL!
+echo Tunnel URL: !TUNNEL_URL! >> "%LOG_FILE%"
+echo [4/5] Done.
 echo.
 
-echo [4/4] Writing configuration...
-echo [4/4] Writing configuration >> "%LOG_FILE%"
-"%NODE%" -e "const fs=require('fs');const t=JSON.parse(fs.readFileSync('%SCRIPT_DIR%token.json','utf8'));const cfg={models:{mode:'merge',providers:{proxy:{baseUrl:t.proxy_base_url,apiKey:t.token,api:'openai-completions',models:[{id:'auto',name:'Auto',reasoning:false,input:['text'],contextWindow:128000,maxTokens:4096}]}}}};fs.writeFileSync('%APP_DIR%\\opencat.json',JSON.stringify(cfg,null,2));console.log('Config written.');const html='<html><head><meta http-equiv=\"refresh\" content=\"0;url='+t.chat_url+'\"></head></html>';fs.writeFileSync('%SCRIPT_DIR%open-chat.html',html);console.log('Chat shortcut created: open-chat.html')"
-echo Config written successfully >> "%LOG_FILE%"
+echo [5/5] Registering tunnel with server...
+echo [5/5] Registering tunnel >> "%LOG_FILE%"
+"%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){const r=JSON.parse(b);console.log('Registered. OpenClaw URL: '+r.openclaw_url)}else{console.error('Registration failed: '+b)}})});req.on('error',e=>console.error('Error: '+e.message));req.write(d);req.end()" "!SERVER_BASE!" "!TUNNEL_URL!" "!TOKEN!"
+echo [5/5] Done.
+echo.
+goto :show_result
+
+:tunnel_timeout
+echo WARN: Could not detect tunnel URL within 30 seconds.
+echo WARN: tunnel timeout >> "%LOG_FILE%"
+echo     Check %TUNNEL_LOG% for details.
 echo.
 
-:done
+:show_result
 echo Installation completed successfully >> "%LOG_FILE%"
 echo.
 echo ==========================================
 echo   Installation complete!
+echo ==========================================
 echo.
-if exist "%SCRIPT_DIR%open-chat.html" (
-    echo   To chat: double-click open-chat.html
-    echo   Log file: %LOG_FILE%
+echo   1. Remote Chat (server proxy):
+echo      %CHAT_URL%
+echo.
+if defined TUNNEL_URL (
+    echo   2. Local OpenClaw via tunnel:
+    echo      !TUNNEL_URL!
+    echo.
+    echo      Or via kuroneko redirect:
+    echo      !SERVER_BASE!/openclaw?token=!TOKEN!
 ) else (
-    echo   To chat: open the chat_url in token.json
-    echo   Log file: %LOG_FILE%
+    echo   2. Local OpenClaw (this machine only):
+    echo      http://127.0.0.1:%OPENCLAW_PORT%
 )
+echo.
 echo ==========================================
 pause

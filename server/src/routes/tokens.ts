@@ -6,10 +6,22 @@ const VALID_PLATFORMS = ["win-x64", "darwin-arm64", "darwin-x64", "linux-x64"];
 const app = new Hono();
 
 /**
- * POST /api/tokens — allocate a new token (called by install script).
+ * POST /api/tokens — allocate a new token (build/packaging only; requires X-Build-Secret).
+ * Not callable from install script; only from build server with BUILD_SECRET.
  * Protocol spec §3.1
  */
 app.post("/", async (c) => {
+  const buildSecret = process.env.BUILD_SECRET;
+  if (buildSecret) {
+    const provided = c.req.header("X-Build-Secret");
+    if (provided !== buildSecret) {
+      return c.json(
+        { error: { code: "UNAUTHORIZED", message: "Token allocation requires build secret" } },
+        401,
+      );
+    }
+  }
+
   const body = await c.req.json().catch(() => null);
   if (!body) {
     return c.json({ error: { code: "INVALID_REQUEST", message: "Invalid JSON body" } }, 400);

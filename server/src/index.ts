@@ -8,7 +8,9 @@ import { initDb } from "./db/schema.js";
 import tokenRoutes from "./routes/tokens.js";
 import adminRoutes from "./routes/admin.js";
 import proxyRoutes from "./routes/proxy.js";
+import tunnelRoutes from "./routes/tunnel.js";
 import { adminAuth } from "./middleware/auth.js";
+import { findToken } from "./db/tokens.js";
 
 const app = new Hono();
 
@@ -32,6 +34,25 @@ app.route("/api/admin", adminRoutes);
 
 // LLM proxy (OpenAI-compatible)
 app.route("/v1", proxyRoutes);
+
+// Tunnel registration (user machine registers cloudflared URL)
+app.route("/api/tunnel", tunnelRoutes);
+
+// OpenClaw redirect — 302 to user's tunnel URL, no traffic proxied
+app.get("/openclaw", (c) => {
+  const token = c.req.query("token");
+  if (!token) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "Missing token parameter" } }, 401);
+  }
+  const record = findToken(token);
+  if (!record) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "Invalid token" } }, 401);
+  }
+  if (!record.tunnel_url) {
+    return c.html(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>OpenClaw</title></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#333"><div style="text-align:center"><h2>OpenClaw Offline</h2><p>Please start OpenClaw on your computer first.</p><p style="color:#888;font-size:14px">The local application needs to be running with an active tunnel.</p></div></body></html>`);
+  }
+  return c.redirect(record.tunnel_url, 302);
+});
 
 // Chat Web UI (static files)
 app.use("/chat/*", serveStatic({ root: "./public" }));

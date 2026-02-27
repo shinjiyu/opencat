@@ -10,6 +10,8 @@ export interface TokenRecord {
   daily_limit: number;
   monthly_limit: number;
   meta: string | null;
+  tunnel_url: string | null;
+  tunnel_updated_at: string | null;
   created_at: string;
   last_used_at: string | null;
 }
@@ -47,6 +49,8 @@ export function createToken(params: {
     daily_limit: dailyLimit,
     monthly_limit: monthlyLimit,
     meta: params.meta ? JSON.stringify(params.meta) : null,
+    tunnel_url: null,
+    tunnel_updated_at: null,
     created_at: now,
     last_used_at: null,
   };
@@ -118,6 +122,26 @@ export function touchToken(token: string): void {
     db.tokens[token].last_used_at = new Date().toISOString();
     saveDb();
   }
+}
+
+export function setTunnelUrl(token: string, tunnelUrl: string): TokenRecord | undefined {
+  const db = getDb();
+  const record = db.tokens[token];
+  if (!record) return undefined;
+  record.tunnel_url = tunnelUrl;
+  record.tunnel_updated_at = new Date().toISOString();
+  saveDb();
+  return record;
+}
+
+export function clearTunnelUrl(token: string): boolean {
+  const db = getDb();
+  const record = db.tokens[token];
+  if (!record) return false;
+  record.tunnel_url = null;
+  record.tunnel_updated_at = null;
+  saveDb();
+  return true;
 }
 
 function todayUTC(): string {

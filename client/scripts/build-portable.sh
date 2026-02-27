@@ -12,14 +12,17 @@ set -euo pipefail
 #   --node-version   Node.js version (default: 22.14.0)
 #   --app-package    npm package to bundle (default: openclaw@2026.2.26)
 #   --out-dir        Output directory (default: ./dist)
-#   --pre-token      Pre-allocate a token per package (requires server running)
+#   --pre-token      Pre-allocate a token per package (default: on, requires server running)
+#   --no-pre-token   Disable pre-allocate token
+#   --build-secret   Secret for POST /api/tokens (env BUILD_SECRET or this arg; required when server sets BUILD_SECRET)
 
 PLATFORM=""
 NODE_VERSION="${NODE_VERSION:-22.14.0}"
 APP_PACKAGE="${APP_PACKAGE:-openclaw@2026.2.26}"
 OUT_DIR="$(pwd)/dist"
 SERVER_URL="${SERVER_URL:-https://kuroneko.chat/opencat}"
-PRE_TOKEN=false
+PRE_TOKEN=true
+BUILD_SECRET="${BUILD_SECRET:-}"
 
 ALL_PLATFORMS=(win-x64 darwin-arm64 darwin-x64 linux-x64)
 
@@ -31,6 +34,8 @@ while [[ $# -gt 0 ]]; do
     --app-package) APP_PACKAGE="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --pre-token) PRE_TOKEN=true; shift ;;
+    --no-pre-token) PRE_TOKEN=false; shift ;;
+    --build-secret) BUILD_SECRET="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -51,7 +56,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="${APP_PACKAGE%%@*}"
 APP_VERSION="${APP_PACKAGE##*@}"
 
-if [[ "$PLATFORM" == "all" ]]; then
+  if [[ "$PLATFORM" == "all" ]]; then
   echo "==> Building all platforms..."
   for p in "${ALL_PLATFORMS[@]}"; do
     echo ""
@@ -60,6 +65,7 @@ if [[ "$PLATFORM" == "all" ]]; then
     echo "========================================"
     EXTRA_ARGS=""
     if $PRE_TOKEN; then EXTRA_ARGS="--pre-token"; fi
+    [[ -n "$BUILD_SECRET" ]] && EXTRA_ARGS="$EXTRA_ARGS --build-secret $BUILD_SECRET"
     "$0" --platform "$p" --server-url "$SERVER_URL" \
          --node-version "$NODE_VERSION" \
          --app-package "$APP_PACKAGE" \
@@ -124,12 +130,45 @@ else
   mkdir -p "$BUNDLE_DIR/lib/app"
 fi
 
+# --- Step 2b: Download cloudflared ---
+echo "==> Downloading cloudflared for ${PLATFORM}..."
+case "$PLATFORM" in
+  win-x64)       CF_FILE="cloudflared-windows-amd64.exe"; CF_BIN="cloudflared.exe" ;;
+  darwin-arm64)  CF_FILE="cloudflared-darwin-amd64.tgz"; CF_BIN="cloudflared" ;;
+  darwin-x64)    CF_FILE="cloudflared-darwin-amd64.tgz"; CF_BIN="cloudflared" ;;
+  linux-x64)     CF_FILE="cloudflared-linux-amd64"; CF_BIN="cloudflared" ;;
+esac
+CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/${CF_FILE}"
+
+mkdir -p "$BUNDLE_DIR/tools/cloudflared"
+if [[ -f "$CACHE_DIR/$CF_FILE" ]]; then
+  echo "    Using cached cloudflared"
+  cp "$CACHE_DIR/$CF_FILE" "$BUILD_DIR/$CF_FILE"
+else
+  curl -fSL --progress-bar "$CF_URL" -o "$BUILD_DIR/$CF_FILE" || {
+    echo "WARN: Failed to download cloudflared. Tunnel will not be bundled."
+    CF_FILE=""
+  }
+  [[ -n "$CF_FILE" ]] && cp "$BUILD_DIR/$CF_FILE" "$CACHE_DIR/$CF_FILE"
+fi
+
+if [[ -n "$CF_FILE" ]]; then
+  if [[ "$CF_FILE" == *.tgz ]]; then
+    tar -xzf "$BUILD_DIR/$CF_FILE" -C "$BUNDLE_DIR/tools/cloudflared"
+  else
+    cp "$BUILD_DIR/$CF_FILE" "$BUNDLE_DIR/tools/cloudflared/$CF_BIN"
+  fi
+  chmod +x "$BUNDLE_DIR/tools/cloudflared/$CF_BIN" 2>/dev/null || true
+  echo "    cloudflared bundled at tools/cloudflared/$CF_BIN"
+fi
+
 # --- Step 3: Inject server URL into install scripts ---
 echo "==> Copying install scripts (server: $SERVER_URL)..."
 
 if [[ "$PLATFORM" == win-x64 ]]; then
-  sed "s|SERVER_URL=https://proxy.example.com|SERVER_URL=$SERVER_URL|g" \
-    "$SCRIPT_DIR/install.bat" > "$BUNDLE_DIR/install.bat"
+  cp "$SCRIPT_DIR/install.bat" "$BUNDLE_DIR/install.bat"
+  # Windows cmd requires CRLF
+  sed 's/$/\r/' "$BUNDLE_DIR/install.bat" > "$BUNDLE_DIR/install.bat.crlf" && mv "$BUNDLE_DIR/install.bat.crlf" "$BUNDLE_DIR/install.bat"
 else
   sed "s|SERVER_URL=\${SERVER_URL:-https://proxy.example.com}|SERVER_URL=\${SERVER_URL:-$SERVER_URL}|g" \
     "$SCRIPT_DIR/install.sh" > "$BUNDLE_DIR/install.sh"
@@ -142,10 +181,13 @@ cp "$SCRIPT_DIR/../templates/README.txt" "$BUNDLE_DIR/README.txt" 2>/dev/null ||
 # --- Step 5 (optional): Pre-allocate token ---
 if $PRE_TOKEN; then
   echo "==> Pre-allocating token from $SERVER_URL..."
-  INSTALL_ID="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "pre-$(date +%s)")"
+  BUILD_NODE="$BUNDLE_DIR/tools/node/node.exe"
+  [[ -x "$BUILD_NODE" ]] || BUILD_NODE="$BUNDLE_DIR/tools/node/bin/node"
+  INSTALL_ID="$(uuidgen 2>/dev/null || "$BUILD_NODE" -e "console.log(require('crypto').randomUUID())" 2>/dev/null || echo "pre-$(date +%s)")"
 
   TOKEN_RESPONSE=$(curl -sf -X POST "$SERVER_URL/api/tokens" \
     -H 'Content-Type: application/json' \
+    -H "X-Build-Secret: ${BUILD_SECRET}" \
     -d "{\"platform\":\"$PLATFORM\",\"install_id\":\"$INSTALL_ID\",\"version\":\"$APP_VERSION\"}" \
   ) || {
     echo "WARN: Failed to pre-allocate token. User will need to run install script."
@@ -155,9 +197,9 @@ if $PRE_TOKEN; then
   if [[ -n "$TOKEN_RESPONSE" ]]; then
     echo "$TOKEN_RESPONSE" > "$BUNDLE_DIR/token.json"
 
-    TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
-    CHAT_URL=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['chat_url'])")
-    PROXY_URL=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['proxy_base_url'])")
+    TOKEN=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.token)" "$TOKEN_RESPONSE")
+    CHAT_URL=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.chat_url)" "$TOKEN_RESPONSE")
+    PROXY_URL=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.proxy_base_url)" "$TOKEN_RESPONSE")
 
     cat > "$BUNDLE_DIR/lib/app/opencat.json" <<EOJSON
 {
@@ -184,11 +226,34 @@ EOHTML
   fi
 fi
 
-# --- Step 6: Create zip ---
+# --- Step 6: Create zip (standard .zip format, no 7z) ---
 echo "==> Creating zip..."
 mkdir -p "$OUT_DIR"
 ZIP_NAME="opencat-portable-${PLATFORM}.zip"
-(cd "$BUILD_DIR" && zip -qr "$OUT_DIR/$ZIP_NAME" opencat-portable/)
 
-SIZE=$(du -sh "$OUT_DIR/$ZIP_NAME" | cut -f1)
+# Prefer zip from repo tools/ (bundled); then system zip
+BUNDLED_ZIP="$SCRIPT_DIR/tools/zip.exe"
+ZIP_CMD=""
+if [[ "$PLATFORM" == "win-x64" ]] && [[ -x "$BUNDLED_ZIP" || -f "$BUNDLED_ZIP" ]]; then
+  ZIP_CMD="$BUNDLED_ZIP"
+elif command -v zip &>/dev/null; then
+  ZIP_CMD="zip"
+fi
+
+if [[ -z "$ZIP_CMD" ]]; then
+  echo "ERROR: zip not found. For win-x64 build, ensure client/scripts/tools/zip.exe exists (Info-ZIP). For other platforms, install zip (e.g. 'apt install zip' or 'brew install zip')."
+  exit 1
+fi
+
+# Create zip: recursive, quiet. On Windows zip.exe we need Windows paths for output
+if [[ "$ZIP_CMD" == *.exe ]]; then
+  # Convert Unix path to Windows path for zip.exe (e.g. /c/opencat/... -> C:\opencat\...)
+  WIN_OUT=$(echo "$OUT_DIR" | sed 's|^/\([a-zA-Z]\)/|\1:/|' | sed 's|/|\\|g')
+  WIN_ZIP_PATH="$WIN_OUT\\$ZIP_NAME"
+  (cd "$BUILD_DIR" && "$ZIP_CMD" -r -q "$WIN_ZIP_PATH" opencat-portable/)
+else
+  (cd "$BUILD_DIR" && "$ZIP_CMD" -r -q "$OUT_DIR/$ZIP_NAME" opencat-portable/)
+fi
+
+SIZE=$(du -sh "$OUT_DIR/$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 echo "==> Done: $OUT_DIR/$ZIP_NAME ($SIZE)"

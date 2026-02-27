@@ -9,13 +9,16 @@
 ## 1. 总览
 
 ```
-客户端                                     服务端
-──────                                     ──────
-install 脚本  ── POST /api/tokens ──────→  Token 服务（分配 + 入库）
-客户端 CLI   ── POST /v1/chat/completions → LLM 代理（校验 + 限流 + 转发）
-浏览器        ── GET  /chat?token=xxx ───→  Web UI（聊天页面）
-浏览器 (JS)   ── POST /v1/chat/completions → LLM 代理（同上）
-管理员        ── /api/admin/* ───────────→  管理接口（内部使用）
+客户端 / 打包机                                服务端
+────────────                                   ──────
+打包脚本        ── POST /api/tokens ──────→  Token 服务（分配 + 入库，需 X-Build-Secret）
+install 脚本    ── 不调用 /api/tokens；仅使用预配置的 token.json + opencat.json
+                ── 启动 OpenClaw + cloudflared 隧道
+                ── PUT /api/tunnel ──────→  登记隧道 URL（需 Bearer Token）
+客户端 / 浏览器 ── POST /v1/chat/completions → LLM 代理（校验 + 限流 + 转发）
+浏览器          ── GET  /chat?token=xxx ───→  Web UI（服务端代理聊天页）
+浏览器          ── GET  /openclaw?token=xxx → 302 重定向到用户本机 OpenClaw（经隧道）
+管理员          ── /api/admin/* ───────────→  管理接口（内部使用）
 ```
 
 **传输层**：全部使用 **HTTPS**（端口 443）。开发环境可用 HTTP。
@@ -30,7 +33,8 @@ install 脚本  ── POST /api/tokens ──────→  Token 服务（�
 
 ### 2.1 用户 Token（Bearer Token）
 
-- 由 `POST /api/tokens` 分配，格式为 **`occ_` + 32 位随机 hex**（共 36 字符），例如 `occ_a1b2c3d4e5f6...`。
+- 由 **打包脚本** 在打便携包时调用 `POST /api/tokens` 分配（需服务端鉴权，见 2.3）；**install 脚本不再申请 Token**，仅使用包内预配置的 token.json / opencat.json。
+- 格式为 **`occ_` + 32 位随机 hex**（共 36 字符），例如 `occ_a1b2c3d4e5f6...`。
 - 客户端在所有 LLM 代理请求中通过以下方式之一携带 Token：
   - **HTTP Header**（推荐）：`Authorization: Bearer occ_xxx`
   - **URL 参数**（仅 Web UI 打开页面时）：`?token=occ_xxx`
@@ -41,24 +45,30 @@ install 脚本  ── POST /api/tokens ──────→  Token 服务（�
 - 管理接口（`/api/admin/*`）使用独立的 **Admin Secret**，通过 Header 传递：`X-Admin-Secret: <secret>`。
 - Admin Secret 在服务端环境变量 `ADMIN_SECRET` 中配置。
 
+### 2.3 打包鉴权（Token 分配）
+
+- **分配 Token 仅允许在打包时进行**。当服务端设置环境变量 `BUILD_SECRET` 时，`POST /api/tokens` 必须在请求头中携带 **`X-Build-Secret: <BUILD_SECRET>`**，否则返回 401。
+- install 脚本**禁止**调用 `POST /api/tokens`；用户端安装包必须为预配置包（包内已含 token.json 与 opencat.json）。
+
 ---
 
 ## 3. 接口定义
 
-### 3.1 `POST /api/tokens` — 分配新 Token
+### 3.1 `POST /api/tokens` — 分配新 Token（仅打包时）
 
-**用途**：install 脚本在用户电脑上调用，请求分配一个新 Token。
+**用途**：**打包脚本**在打便携包时调用，为当前包预分配一个 Token。不在用户 install 时调用。
 
 **请求**：
 
 ```http
 POST /api/tokens HTTP/1.1
 Content-Type: application/json
+X-Build-Secret: <BUILD_SECRET>    # 当服务端配置了 BUILD_SECRET 时必填
 
 {
   "platform": "win-x64",          // 必填: win-x64 | darwin-arm64 | darwin-x64 | linux-x64
-  "install_id": "uuid-string",    // 必填: 客户端本地生成的安装实例 UUID
-  "version": "1.0.0",             // 必填: 客户端版本
+  "install_id": "uuid-string",    // 必填: 打包时生成的实例 UUID
+  "version": "1.0.0",             // 必填: 客户端/包版本
   "meta": {                       // 可选: 额外信息
     "hostname": "USER-PC",
     "label": "张三的电脑"
@@ -375,6 +385,92 @@ X-Admin-Secret: <secret>
 
 ---
 
+### 3.7 `PUT /api/tunnel` — 登记 / 更新隧道 URL
+
+**用途**：用户本机 install 脚本或 OpenClaw 启动脚本在 cloudflared 隧道就绪后调用，告知服务端该 Token 对应的隧道公网 URL。**服务端仅存储此 URL，不代理流量**。
+
+**鉴权**：`Authorization: Bearer occ_xxx`（复用用户 Token）。
+
+**请求**：
+
+```http
+PUT /api/tunnel HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer occ_a1b2c3d4e5f67890a1b2c3d4e5f67890
+
+{
+  "tunnel_url": "https://xxx-yyy-zzz.trycloudflare.com"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `tunnel_url` | string | 是 | cloudflared 等分配的公网 HTTPS URL，必须以 `https://` 开头 |
+
+**成功响应**（`200 OK`）：
+
+```json
+{
+  "token": "occ_a1b2c3d4e5f67890a1b2c3d4e5f67890",
+  "tunnel_url": "https://xxx-yyy-zzz.trycloudflare.com",
+  "openclaw_url": "https://kuroneko.chat/opencat/openclaw?token=occ_a1b2c3d4e5f67890a1b2c3d4e5f67890",
+  "updated_at": "2026-02-27T19:00:00Z"
+}
+```
+
+`openclaw_url` 是用户可以分享给他人的入口，服务端收到请求后会 302 重定向到 `tunnel_url`。
+
+**错误响应**：
+
+| HTTP 状态码 | `error.code` | 说明 |
+|-------------|--------------|------|
+| 400 | `INVALID_REQUEST` | 缺少 tunnel_url 或格式无效 |
+| 401 | `UNAUTHORIZED` | Token 缺失或无效 |
+| 403 | `TOKEN_DISABLED` | Token 已被禁用 |
+
+**幂等性**：同一 Token 多次调用会**覆盖**旧的 `tunnel_url`（cloudflared 每次启动 URL 不同），以最后一次为准。
+
+---
+
+### 3.8 `DELETE /api/tunnel` — 注销隧道
+
+**用途**：用户关闭 OpenClaw / cloudflared 时可选调用，清除已登记的隧道 URL。
+
+**鉴权**：`Authorization: Bearer occ_xxx`。
+
+**请求**：
+
+```http
+DELETE /api/tunnel HTTP/1.1
+Authorization: Bearer occ_a1b2c3d4e5f67890a1b2c3d4e5f67890
+```
+
+**成功响应**（`204 No Content`）。
+
+---
+
+### 3.9 `GET /openclaw` — 重定向到用户本机 OpenClaw
+
+**用途**：浏览器访问，服务端根据 Token 查出已登记的隧道 URL，**302 重定向**到该 URL。**不代理任何流量，带宽仅一次重定向。**
+
+**请求**：
+
+```http
+GET /openclaw?token=occ_xxx HTTP/1.1
+```
+
+**行为**：
+
+| 场景 | 响应 |
+|------|------|
+| Token 有效且已登记 `tunnel_url` | `302 Found`，`Location: <tunnel_url>` |
+| Token 有效但未登记隧道 | `200 OK`，返回简短 HTML 提示：「请先在本机启动 OpenClaw」 |
+| Token 无效或缺失 | `401 Unauthorized` |
+
+**带宽说明**：服务端**仅返回 302 或极小 HTML**，之后浏览器直连用户隧道，流量不经过 kuroneko。
+
+---
+
 ## 4. 数据模型
 
 ### 4.1 `tokens` 表
@@ -389,6 +485,8 @@ X-Admin-Secret: <secret>
 | `daily_limit` | INTEGER NOT NULL DEFAULT 100 | 每日请求上限 |
 | `monthly_limit` | INTEGER NOT NULL DEFAULT 3000 | 每月请求上限 |
 | `meta` | TEXT | JSON 格式的额外信息 |
+| `tunnel_url` | TEXT | 用户本机 cloudflared 隧道 URL（可空；由 `PUT /api/tunnel` 写入） |
+| `tunnel_updated_at` | TEXT | 隧道 URL 最后更新时间（ISO 8601） |
 | `created_at` | TEXT NOT NULL | ISO 8601 创建时间 |
 | `last_used_at` | TEXT | ISO 8601 最后使用时间 |
 
@@ -430,26 +528,24 @@ X-Admin-Secret: <secret>
     │
     ├─ 1. 检测包内 Node 可用
     │
-    ├─ 2. 生成 install_id (UUID v4)
+    ├─ 2. npm install --omit=dev --ignore-scripts
     │
-    ├─ 3. POST /api/tokens
-    │     请求体: { platform, install_id, version }
-    │     ← 响应: { token, chat_url, proxy_base_url, quota }
+    ├─ 3. 验证预配置（opencat.json + token.json 必须存在）
     │
-    ├─ 4. npm install --omit=dev (用包内 Node 安装依赖)
+    ├─ 4. 启动 OpenClaw (npm start, 监听 127.0.0.1:OPENCLAW_PORT)
     │
-    ├─ 5. 写入配置文件:
-    │     models.providers.proxy = {
-    │       baseUrl: proxy_base_url,
-    │       apiKey: token,
-    │       api: "openai-completions",
-    │       models: [{ id: "auto", name: "Auto" }]
-    │     }
+    ├─ 5. 启动 cloudflared 隧道
+    │     tools/cloudflared tunnel --url http://127.0.0.1:OPENCLAW_PORT
+    │     从 stdout/stderr 解析 tunnel_url
     │
-    ├─ 6. 生成 open-chat.html (快捷方式)
-    │     指向 chat_url
+    ├─ 6. PUT /api/tunnel
+    │     Header: Authorization: Bearer <token>
+    │     Body: { tunnel_url }
+    │     ← 响应: { openclaw_url, ... }
     │
-    └─ 7. 输出安装完成提示
+    └─ 7. 输出安装完成提示:
+          - 远端代理聊天:  chat_url (server/public/index.html)
+          - 本地 OpenClaw: openclaw_url → 302 到隧道 → 用户本机 OpenClaw Web UI
 ```
 
 ---
