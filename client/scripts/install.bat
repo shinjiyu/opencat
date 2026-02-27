@@ -10,7 +10,9 @@ set "SCRIPT_DIR=%~dp0"
 set "NODE=%SCRIPT_DIR%tools\node\node.exe"
 set "NPM=%SCRIPT_DIR%tools\node\npm.cmd"
 set "APP_DIR=%SCRIPT_DIR%lib\app"
-set "LOG_FILE=%SCRIPT_DIR%install.log"
+set "LOG_DIR=%SCRIPT_DIR%logs"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+set "LOG_FILE=%LOG_DIR%\install.log"
 
 echo [OpenCat Install] %date% %time% > "%LOG_FILE%"
 

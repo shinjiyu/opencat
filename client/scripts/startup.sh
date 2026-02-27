@@ -12,7 +12,11 @@ NPM="$SCRIPT_DIR/tools/node/bin/npm"
 APP_DIR="$SCRIPT_DIR/lib/app"
 CLOUDFLARED="$SCRIPT_DIR/tools/cloudflared/cloudflared"
 OPENCLAW_PORT="${OPENCLAW_PORT:-3080}"
-TUNNEL_LOG="$SCRIPT_DIR/cloudflared.log"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+TUNNEL_LOG="$LOG_DIR/cloudflared.log"
+OPENCLAW_LOG="$LOG_DIR/openclaw.log"
+WATCHDOG_LOG="$LOG_DIR/watchdog.log"
 WATCHDOG_INTERVAL=30
 
 # Read token config
@@ -92,7 +96,7 @@ start_tunnel() {
 
   if [[ -z "$TUNNEL_URL" ]]; then
     echo "WARN: Could not detect tunnel URL within 30s."
-    echo "     Check $TUNNEL_LOG for details."
+    echo "     Check $LOG_DIR/cloudflared.log for details."
     return 1
   fi
   echo "    Tunnel: $TUNNEL_URL"
@@ -114,7 +118,7 @@ echo "[2/4] Starting OpenClaw gateway on port $OPENCLAW_PORT..."
 "$NODE" "$SCRIPT_DIR/configure-gateway.js" >/dev/null 2>&1
 echo "    Gateway config OK"
 
-(nohup "$NODE" openclaw.mjs gateway run --port "$OPENCLAW_PORT" --bind loopback --no-color > "$SCRIPT_DIR/openclaw.log" 2>&1 &)
+(nohup "$NODE" openclaw.mjs gateway run --port "$OPENCLAW_PORT" --bind loopback --no-color > "$OPENCLAW_LOG" 2>&1 &)
 cd "$SCRIPT_DIR"
 
 READY=0
@@ -128,7 +132,7 @@ done
 
 if [[ "$READY" -eq 0 ]]; then
   echo "WARN: OpenClaw did not respond within 15s. Continuing anyway..."
-  echo "     Check $SCRIPT_DIR/openclaw.log for details."
+  echo "     Check $LOG_DIR/openclaw.log for details."
 else
   echo "    OpenClaw gateway running on ws://127.0.0.1:$OPENCLAW_PORT"
 fi
@@ -185,45 +189,46 @@ fi
 
 # ---------- Watchdog: monitor tunnel health ----------
 
-trap 'echo "Watchdog stopped."; exit 0' INT TERM
+wlog() { echo "$1"; echo "$1" >> "$WATCHDOG_LOG"; }
+
+echo "[$(date)] Watchdog started for $TUNNEL_URL" > "$WATCHDOG_LOG"
+trap 'wlog "Watchdog stopped."; exit 0' INT TERM
 
 FAIL_COUNT=0
 
 while true; do
   sleep "$WATCHDOG_INTERVAL"
 
-  # Check if cloudflared process is alive
   if ! pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
-    echo "[Watchdog $(date +%H:%M:%S)] cloudflared process died. Restarting..."
+    wlog "[Watchdog $(date +%H:%M:%S)] cloudflared process died. Restarting..."
     FAIL_COUNT=0
     if start_tunnel; then
-      echo "[Watchdog $(date +%H:%M:%S)] New tunnel: $TUNNEL_URL"
+      wlog "[Watchdog $(date +%H:%M:%S)] New tunnel: $TUNNEL_URL"
       register_tunnel "$TUNNEL_URL"
     else
-      echo "[Watchdog $(date +%H:%M:%S)] Failed to restart tunnel. Will retry..."
+      wlog "[Watchdog $(date +%H:%M:%S)] Failed to restart tunnel. Will retry..."
     fi
     continue
   fi
 
-  # Check if tunnel URL is reachable
   if "$NODE" -e "const h=require('https');h.get(process.argv[1],{timeout:10000},(r)=>{process.exit(r.statusCode>=200&&r.statusCode<500?0:1)}).on('error',()=>process.exit(1))" "$TUNNEL_URL" 2>/dev/null; then
     if [[ "$FAIL_COUNT" -gt 0 ]]; then
-      echo "[Watchdog $(date +%H:%M:%S)] Tunnel recovered."
+      wlog "[Watchdog $(date +%H:%M:%S)] Tunnel recovered."
       FAIL_COUNT=0
     fi
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    echo "[Watchdog $(date +%H:%M:%S)] Tunnel unreachable (attempt $FAIL_COUNT/3)"
+    wlog "[Watchdog $(date +%H:%M:%S)] Tunnel unreachable (attempt $FAIL_COUNT/3)"
     if [[ "$FAIL_COUNT" -ge 3 ]]; then
-      echo "[Watchdog $(date +%H:%M:%S)] 3 consecutive failures. Restarting tunnel..."
+      wlog "[Watchdog $(date +%H:%M:%S)] 3 consecutive failures. Restarting tunnel..."
       pkill -f "cloudflared tunnel" 2>/dev/null || true
       sleep 2
       FAIL_COUNT=0
       if start_tunnel; then
-        echo "[Watchdog $(date +%H:%M:%S)] New tunnel: $TUNNEL_URL"
+        wlog "[Watchdog $(date +%H:%M:%S)] New tunnel: $TUNNEL_URL"
         register_tunnel "$TUNNEL_URL"
       else
-        echo "[Watchdog $(date +%H:%M:%S)] Failed to restart tunnel. Will retry..."
+        wlog "[Watchdog $(date +%H:%M:%S)] Failed to restart tunnel. Will retry..."
       fi
     fi
   fi

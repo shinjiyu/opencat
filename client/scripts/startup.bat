@@ -11,7 +11,11 @@ set "NODE=%SCRIPT_DIR%tools\node\node.exe"
 set "APP_DIR=%SCRIPT_DIR%lib\app"
 set "CLOUDFLARED=%SCRIPT_DIR%tools\cloudflared\cloudflared.exe"
 set "OPENCLAW_PORT=3080"
-set "TUNNEL_LOG=%SCRIPT_DIR%cloudflared.log"
+set "LOG_DIR=%SCRIPT_DIR%logs"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+set "TUNNEL_LOG=%LOG_DIR%\cloudflared.log"
+set "OPENCLAW_LOG=%LOG_DIR%\openclaw.log"
+set "WATCHDOG_LOG=%LOG_DIR%\watchdog.log"
 set "WATCHDOG_INTERVAL=30"
 
 :: Read token config
@@ -54,7 +58,7 @@ echo     Gateway config OK
     echo cd /d "%APP_DIR%"
     echo "%NODE%" openclaw.mjs gateway run --port %OPENCLAW_PORT% --bind loopback --no-color
 )
-start "OpenClaw" /min cmd /c ""%SCRIPT_DIR%_run_openclaw.bat" > "%SCRIPT_DIR%openclaw.log" 2>&1"
+start "OpenClaw" /min cmd /c ""%SCRIPT_DIR%_run_openclaw.bat" > "%OPENCLAW_LOG%" 2>&1"
 
 :: Wait for port to be listening (simple netstat check)
 echo     Waiting for gateway...
@@ -66,7 +70,7 @@ for /l %%i in (1,1,30) do (
     )
 )
 if "!READY!"=="0" (
-    echo     WARN: Gateway not detected within 30s. Check openclaw.log
+    echo     WARN: Gateway not detected within 30s. Check logs\openclaw.log
 ) else (
     echo     OpenClaw gateway running on ws://127.0.0.1:%OPENCLAW_PORT%
 )
@@ -102,7 +106,7 @@ for /l %%i in (1,1,30) do (
 )
 
 if "!TUNNEL_URL!"=="" (
-    echo     WARN: Tunnel URL not detected within 45s. Check cloudflared.log
+    echo     WARN: Tunnel URL not detected within 45s. Check logs\cloudflared.log
     echo     If log shows "429 Too Many Requests", Cloudflare quick tunnel is rate-limited; wait a few minutes and run startup again.
     goto :show_local_only
 )
@@ -137,6 +141,7 @@ echo ==========================================
 echo.
 
 title OpenCat Watchdog - !TUNNEL_URL!
+echo [%date% %time%] Watchdog started for !TUNNEL_URL! > "%WATCHDOG_LOG%"
 goto :watchdog
 
 :show_local_only
@@ -163,6 +168,7 @@ set /a CHECK_COUNT+=1
 tasklist /fi "imagename eq cloudflared.exe" /nh 2>nul | find /i "cloudflared.exe" >nul
 if errorlevel 1 (
     echo [%time%] cloudflared process not found. Restarting...
+    echo [%time%] cloudflared process not found. Restarting... >> "%WATCHDOG_LOG%"
     goto :restart_tunnel
 )
 
@@ -171,10 +177,12 @@ if errorlevel 1 (
 if errorlevel 1 (
     set /a FAIL_COUNT+=1
     echo [%time%] Tunnel unreachable ^(!FAIL_COUNT!/3^)
+    echo [%time%] Tunnel unreachable !FAIL_COUNT!/3 >> "%WATCHDOG_LOG%"
     if !FAIL_COUNT! geq 3 goto :restart_tunnel
 ) else (
     if !FAIL_COUNT! gtr 0 (
         echo [%time%] Tunnel recovered.
+        echo [%time%] Tunnel recovered. >> "%WATCHDOG_LOG%"
         set "FAIL_COUNT=0"
     )
     echo [%time%] OK ^(check #!CHECK_COUNT!^) - !TUNNEL_URL!
@@ -191,6 +199,7 @@ start "Cloudflared" /min cmd /c ""%SCRIPT_DIR%_run_cloudflared.bat" > "%TUNNEL_L
 
 set "TUNNEL_URL="
 echo [Watchdog %time%] Waiting for new tunnel...
+echo [Watchdog %time%] Waiting for new tunnel... >> "%WATCHDOG_LOG%"
 for /l %%i in (1,1,30) do (
     if "!TUNNEL_URL!"=="" (
         ping -n 2 127.0.0.1 >nul
@@ -203,11 +212,13 @@ for /l %%i in (1,1,30) do (
 )
 if "!TUNNEL_URL!"=="" (
     echo [Watchdog %time%] Failed to get URL. Retry in %WATCHDOG_INTERVAL%s...
+    echo [Watchdog %time%] Failed to get URL. Retry in %WATCHDOG_INTERVAL%s... >> "%WATCHDOG_LOG%"
     goto :watchdog_loop
 )
 set "TUNNEL_URL=!TUNNEL_URL: =!"
 set "TUNNEL_URL=!TUNNEL_URL:|=!"
 echo [Watchdog %time%] New tunnel: !TUNNEL_URL!
+echo [Watchdog %time%] New tunnel: !TUNNEL_URL! >> "%WATCHDOG_LOG%"
 
 "%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){console.log('[Watchdog] Re-registered OK')}else{console.error('[Watchdog] Failed: '+b)}})});req.on('error',e=>console.error('[Watchdog] Error: '+e.message));req.write(d);req.end()" "!SERVER_BASE!" "!TUNNEL_URL!" "!TOKEN!"
 goto :watchdog_loop

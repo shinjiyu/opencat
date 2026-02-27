@@ -10,7 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODE="$SCRIPT_DIR/tools/node/bin/node"
 NPM="$SCRIPT_DIR/tools/node/bin/npm"
 APP_DIR="$SCRIPT_DIR/lib/app"
-LOG_FILE="$SCRIPT_DIR/install.log"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/install.log"
 
 echo "[OpenCat Install] $(date)" > "$LOG_FILE"
 
