@@ -1,0 +1,22 @@
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "proxy": {
+        "baseUrl": "__PROXY_BASE_URL__",
+        "apiKey": "__TOKEN__",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "auto",
+            "name": "Auto",
+            "reasoning": false,
+            "input": ["text"],
+            "contextWindow": 128000,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  }
+}
