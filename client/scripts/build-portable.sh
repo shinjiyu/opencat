@@ -130,11 +130,19 @@ else
   mkdir -p "$BUNDLE_DIR/lib/app"
 fi
 
+# --- Step 2a: Patch gateway to skip device identity check ---
+for f in "$BUNDLE_DIR"/lib/app/dist/gateway-cli-*.js; do
+  if [[ -f "$f" ]]; then
+    sed -i 's/function evaluateMissingDeviceIdentity(params) {/function evaluateMissingDeviceIdentity(params) { return { kind: "allow" };/' "$f"
+  fi
+done
+echo "    Gateway patched (device identity bypass)"
+
 # --- Step 2b: Download cloudflared ---
 echo "==> Downloading cloudflared for ${PLATFORM}..."
 case "$PLATFORM" in
   win-x64)       CF_FILE="cloudflared-windows-amd64.exe"; CF_BIN="cloudflared.exe" ;;
-  darwin-arm64)  CF_FILE="cloudflared-darwin-amd64.tgz"; CF_BIN="cloudflared" ;;
+  darwin-arm64)  CF_FILE="cloudflared-darwin-arm64.tgz"; CF_BIN="cloudflared" ;;
   darwin-x64)    CF_FILE="cloudflared-darwin-amd64.tgz"; CF_BIN="cloudflared" ;;
   linux-x64)     CF_FILE="cloudflared-linux-amd64"; CF_BIN="cloudflared" ;;
 esac
@@ -162,21 +170,25 @@ if [[ -n "$CF_FILE" ]]; then
   echo "    cloudflared bundled at tools/cloudflared/$CF_BIN"
 fi
 
-# --- Step 3: Inject server URL into install scripts ---
-echo "==> Copying install scripts (server: $SERVER_URL)..."
+# --- Step 3: Copy install + startup scripts ---
+echo "==> Copying scripts (server: $SERVER_URL)..."
 
+cp "$SCRIPT_DIR/configure-gateway.js" "$BUNDLE_DIR/configure-gateway.js"
 if [[ "$PLATFORM" == win-x64 ]]; then
-  cp "$SCRIPT_DIR/install.bat" "$BUNDLE_DIR/install.bat"
-  # Windows cmd requires CRLF
-  sed 's/$/\r/' "$BUNDLE_DIR/install.bat" > "$BUNDLE_DIR/install.bat.crlf" && mv "$BUNDLE_DIR/install.bat.crlf" "$BUNDLE_DIR/install.bat"
+  for f in install.bat startup.bat shutdown.bat; do
+    cp "$SCRIPT_DIR/$f" "$BUNDLE_DIR/$f"
+    sed 's/$/\r/' "$BUNDLE_DIR/$f" > "$BUNDLE_DIR/$f.crlf" && mv "$BUNDLE_DIR/$f.crlf" "$BUNDLE_DIR/$f"
+  done
 else
-  sed "s|SERVER_URL=\${SERVER_URL:-https://proxy.example.com}|SERVER_URL=\${SERVER_URL:-$SERVER_URL}|g" \
-    "$SCRIPT_DIR/install.sh" > "$BUNDLE_DIR/install.sh"
-  chmod +x "$BUNDLE_DIR/install.sh"
+  cp "$SCRIPT_DIR/install.sh" "$BUNDLE_DIR/install.sh"
+  cp "$SCRIPT_DIR/startup.sh" "$BUNDLE_DIR/startup.sh"
+  cp "$SCRIPT_DIR/shutdown.sh" "$BUNDLE_DIR/shutdown.sh"
+  chmod +x "$BUNDLE_DIR/install.sh" "$BUNDLE_DIR/startup.sh" "$BUNDLE_DIR/shutdown.sh"
 fi
 
 # --- Step 4: Copy templates ---
 cp "$SCRIPT_DIR/../templates/README.txt" "$BUNDLE_DIR/README.txt" 2>/dev/null || true
+rm -f "$BUNDLE_DIR/open-chat.html" 2>/dev/null || true
 
 # --- Step 5 (optional): Pre-allocate token ---
 if $PRE_TOKEN; then
@@ -198,7 +210,6 @@ if $PRE_TOKEN; then
     echo "$TOKEN_RESPONSE" > "$BUNDLE_DIR/token.json"
 
     TOKEN=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.token)" "$TOKEN_RESPONSE")
-    CHAT_URL=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.chat_url)" "$TOKEN_RESPONSE")
     PROXY_URL=$("$BUILD_NODE" -e "const r=JSON.parse(process.argv[1]); console.log(r.proxy_base_url)" "$TOKEN_RESPONSE")
 
     cat > "$BUNDLE_DIR/lib/app/opencat.json" <<EOJSON
@@ -217,19 +228,35 @@ if $PRE_TOKEN; then
 }
 EOJSON
 
-    cat > "$BUNDLE_DIR/open-chat.html" <<EOHTML
-<html><head><meta http-equiv="refresh" content="0;url=$CHAT_URL"></head></html>
+    # Create shortcut files (openclaw redirect = Kuroneko entry; no chat UI)
+    OPENCLAW_URL="$SERVER_URL/openclaw?token=$TOKEN"
+    LOCAL_URL="http://localhost:3080"
+
+    if [[ "$PLATFORM" == win-x64 ]]; then
+      printf '[InternetShortcut]\r\nURL=%s\r\n' "$OPENCLAW_URL" > "$BUNDLE_DIR/Kuroneko.url"
+      printf '[InternetShortcut]\r\nURL=%s\r\n' "$LOCAL_URL"    > "$BUNDLE_DIR/OpenClaw Local.url"
+    else
+      cat > "$BUNDLE_DIR/open-kuroneko.html" <<EOHTML
+<html><head><meta http-equiv="refresh" content="0;url=$OPENCLAW_URL"></head></html>
 EOHTML
+      cat > "$BUNDLE_DIR/open-local.html" <<EOHTML
+<html><head><meta http-equiv="refresh" content="0;url=$LOCAL_URL"></head></html>
+EOHTML
+    fi
 
     echo "    Token: $TOKEN"
-    echo "    Chat:  $CHAT_URL"
+    echo "    Proxy: $PROXY_URL"
   fi
 fi
 
 # --- Step 6: Create zip (standard .zip format, no 7z) ---
 echo "==> Creating zip..."
 mkdir -p "$OUT_DIR"
-ZIP_NAME="opencat-portable-${PLATFORM}.zip"
+if [[ -n "${TOKEN:-}" ]]; then
+  ZIP_NAME="opencat-portable-${PLATFORM}-${TOKEN}.zip"
+else
+  ZIP_NAME="opencat-portable-${PLATFORM}.zip"
+fi
 
 # Prefer zip from repo tools/ (bundled); then system zip
 BUNDLED_ZIP="$SCRIPT_DIR/tools/zip.exe"

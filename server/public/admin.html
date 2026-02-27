@@ -92,8 +92,10 @@ tr:hover td { background: #fafafa; }
         <th>Token</th>
         <th>状态</th>
         <th>平台</th>
-        <th>今日用量</th>
-        <th>月用量</th>
+        <th>今日请求</th>
+        <th>今日 Tokens</th>
+        <th>月请求</th>
+        <th>月 Tokens</th>
         <th>创建时间</th>
         <th>最后使用</th>
         <th>操作</th>
@@ -173,13 +175,19 @@ function renderStats() {
   const disabled = allTokens.filter(t => t.status === "disabled").length;
   const usedToday = allTokens.filter(t => t.quota.daily_used > 0).length;
   const totalReqToday = allTokens.reduce((s, t) => s + t.quota.daily_used, 0);
+  const totalPromptToday = allTokens.reduce((s, t) => s + (t.quota.daily_prompt_tokens ?? 0), 0);
+  const totalCompletionToday = allTokens.reduce((s, t) => s + (t.quota.daily_completion_tokens ?? 0), 0);
+  const totalReqMonth = allTokens.reduce((s, t) => s + t.quota.monthly_used, 0);
 
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="label">总 Token 数</div><div class="value">${total}</div></div>
     <div class="stat-card"><div class="label">Active</div><div class="value" style="color:var(--success)">${active}</div></div>
     <div class="stat-card"><div class="label">Disabled</div><div class="value" style="color:var(--danger)">${disabled}</div></div>
     <div class="stat-card"><div class="label">今日活跃</div><div class="value" style="color:var(--accent)">${usedToday}</div></div>
-    <div class="stat-card"><div class="label">今日请求总数</div><div class="value">${totalReqToday}</div></div>
+    <div class="stat-card"><div class="label">今日请求</div><div class="value">${totalReqToday}</div></div>
+    <div class="stat-card"><div class="label">今日 Prompt</div><div class="value">${fmtNum(totalPromptToday)}</div></div>
+    <div class="stat-card"><div class="label">今日 Completion</div><div class="value">${fmtNum(totalCompletionToday)}</div></div>
+    <div class="stat-card"><div class="label">月请求</div><div class="value">${totalReqMonth}</div></div>
   `;
 }
 
@@ -199,7 +207,7 @@ function renderTable() {
 
   const tbody = document.getElementById("tbody");
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">没有 Token</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">没有 Token</td></tr>';
     return;
   }
 
@@ -218,17 +226,29 @@ function renderTable() {
 
     const label = t.meta?.label || t.meta?.hostname || t.install_id?.slice(0, 8) || "";
 
+    const dailyTokens = (t.quota.daily_prompt_tokens ?? 0) + (t.quota.daily_completion_tokens ?? 0);
+    const monthlyTokens = (t.quota.monthly_prompt_tokens ?? 0) + (t.quota.monthly_completion_tokens ?? 0);
+
     return `<tr>
       <td><div class="token-text" title="${t.token}" onclick="copyToken('${t.token}')">${t.token}</div><div style="font-size:11px;color:var(--muted)">${label}</div></td>
       <td>${statusBadge}</td>
       <td>${t.platform}</td>
       <td><div class="usage-bar"><div class="fill ${barColor(dailyPct)}" style="width:${dailyPct}%"></div></div>${t.quota.daily_used}/${t.quota.daily_limit}</td>
+      <td style="font-size:12px;white-space:nowrap" title="Prompt: ${fmtNum(t.quota.daily_prompt_tokens??0)} / Completion: ${fmtNum(t.quota.daily_completion_tokens??0)}">${fmtNum(dailyTokens)}</td>
       <td><div class="usage-bar"><div class="fill ${barColor(monthlyPct)}" style="width:${monthlyPct}%"></div></div>${t.quota.monthly_used}/${t.quota.monthly_limit}</td>
+      <td style="font-size:12px;white-space:nowrap" title="Prompt: ${fmtNum(t.quota.monthly_prompt_tokens??0)} / Completion: ${fmtNum(t.quota.monthly_completion_tokens??0)}">${fmtNum(monthlyTokens)}</td>
       <td class="time">${fmtTime(t.created_at)}</td>
       <td class="time">${t.last_used_at ? fmtTime(t.last_used_at) : '<span style="color:#ccc">未使用</span>'}</td>
       <td class="actions">${toggleBtn}<button class="danger" onclick="deleteToken('${t.token}')">删除</button></td>
     </tr>`;
   }).join("");
+}
+
+function fmtNum(n) {
+  if (n == null || n === 0) return "0";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return String(n);
 }
 
 function fmtTime(iso) {

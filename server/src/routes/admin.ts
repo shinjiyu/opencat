@@ -23,8 +23,12 @@ app.get("/tokens", (c) => {
       quota: {
         daily_limit: t.daily_limit,
         daily_used: usageToday?.request_count ?? 0,
+        daily_prompt_tokens: usageToday?.prompt_tokens ?? 0,
+        daily_completion_tokens: usageToday?.completion_tokens ?? 0,
         monthly_limit: t.monthly_limit,
         monthly_used: usageMonth.request_count,
+        monthly_prompt_tokens: usageMonth.prompt_tokens,
+        monthly_completion_tokens: usageMonth.completion_tokens,
       },
     };
   });

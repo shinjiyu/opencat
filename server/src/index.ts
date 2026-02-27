@@ -54,10 +54,6 @@ app.get("/openclaw", (c) => {
   return c.redirect(record.tunnel_url, 302);
 });
 
-// Chat Web UI (static files)
-app.use("/chat/*", serveStatic({ root: "./public" }));
-app.get("/chat", serveStatic({ root: "./public", path: "index.html" }));
-
 // Admin Dashboard (static page, auth happens client-side via API)
 app.get("/admin", serveStatic({ root: "./public", path: "admin.html" }));
 
@@ -73,7 +69,6 @@ initDb();
 
 serve({ fetch: app.fetch, port, hostname: host }, (info) => {
   console.log(`OpenCat Server listening on http://${host}:${info.port}`);
-  console.log(`  Chat UI:  http://localhost:${info.port}/chat`);
   console.log(`  API:      http://localhost:${info.port}/v1/chat/completions`);
   console.log(`  Tokens:   http://localhost:${info.port}/api/tokens`);
 });

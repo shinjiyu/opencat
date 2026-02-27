@@ -45,7 +45,6 @@ app.post("/", async (c) => {
 
   return c.json({
     token: record.token,
-    chat_url: `${publicBase}/chat?token=${record.token}`,
     proxy_base_url: `${publicBase}/v1`,
     quota: {
       daily_limit: record.daily_limit,

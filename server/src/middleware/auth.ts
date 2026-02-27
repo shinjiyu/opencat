@@ -14,9 +14,33 @@ export function extractToken(c: Context): string | null {
   return queryToken?.trim() || null;
 }
 
+/** Sliding-window per-minute rate limiter (in-memory). */
+const RPM_LIMIT = Number(process.env.RPM_LIMIT ?? 20);
+const rpmBuckets = new Map<string, number[]>();
+
+function checkRateLimit(token: string): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  const windowMs = 60_000;
+  let timestamps = rpmBuckets.get(token);
+  if (!timestamps) {
+    timestamps = [];
+    rpmBuckets.set(token, timestamps);
+  }
+  // Prune entries older than the window
+  while (timestamps.length > 0 && timestamps[0] <= now - windowMs) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= RPM_LIMIT) {
+    const retryAfterMs = timestamps[0] + windowMs - now;
+    return { allowed: false, retryAfterMs };
+  }
+  timestamps.push(now);
+  return { allowed: true, retryAfterMs: 0 };
+}
+
 /**
- * Middleware: validate token and enforce quota.
- * Sets c.set("token", tokenRecord) on success.
+ * Middleware: validate token, enforce quota + per-minute rate limit.
+ * Sets c.set("tokenRecord", record) on success.
  */
 export async function tokenAuth(c: Context, next: Next): Promise<Response | void> {
   const token = extractToken(c);
@@ -33,6 +57,17 @@ export async function tokenAuth(c: Context, next: Next): Promise<Response | void
     return c.json({ error: { code: "TOKEN_DISABLED", message: "Token has been disabled" } }, 403);
   }
 
+  // Per-minute rate limit
+  const rl = checkRateLimit(token);
+  if (!rl.allowed) {
+    c.header("Retry-After", String(Math.ceil(rl.retryAfterMs / 1000)));
+    return c.json(
+      { error: { code: "RATE_LIMITED", message: `Rate limit exceeded (${RPM_LIMIT} req/min). Retry after ${Math.ceil(rl.retryAfterMs / 1000)}s.` } },
+      429,
+    );
+  }
+
+  // Daily quota
   const usageToday = getUsageToday(token);
   const dailyUsed = usageToday?.request_count ?? 0;
   if (dailyUsed >= record.daily_limit) {
@@ -42,6 +77,7 @@ export async function tokenAuth(c: Context, next: Next): Promise<Response | void
     );
   }
 
+  // Monthly quota
   const usageMonth = getUsageMonth(token);
   if (usageMonth.request_count >= record.monthly_limit) {
     return c.json(

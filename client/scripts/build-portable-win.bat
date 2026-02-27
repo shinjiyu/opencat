@@ -20,7 +20,8 @@ if defined BUILD_SECRET set "EXTRA= --build-secret %BUILD_SECRET%"
 set "EXIT_CODE=%errorlevel%"
 echo.
 if %EXIT_CODE% equ 0 (
-    echo Output: %~dp0dist\opencat-portable-win-x64.zip
+    echo Output directory: %~dp0dist\
+    dir /b "%~dp0dist\opencat-portable-win-x64*.zip" 2>nul
 ) else (
     echo Build failed. exit code: %EXIT_CODE%
 )
