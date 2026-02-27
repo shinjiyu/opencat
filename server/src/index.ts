@@ -4,7 +4,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 
-import { getDb, initDb } from "./db/schema.js";
+import { initDb } from "./db/schema.js";
 import tokenRoutes from "./routes/tokens.js";
 import adminRoutes from "./routes/admin.js";
 import proxyRoutes from "./routes/proxy.js";
@@ -45,10 +45,7 @@ app.get("/health", (c) => c.json({ status: "ok", protocol_version: "1.0.0" }));
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "0.0.0.0";
 
-// Init database
-const db = getDb();
-initDb(db);
-console.log(`Database initialized`);
+initDb();
 
 serve({ fetch: app.fetch, port, hostname: host }, (info) => {
   console.log(`OpenCat Server listening on http://${host}:${info.port}`);

@@ -42,7 +42,9 @@
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get("token");
-const BASE = location.origin;
+// Detect path prefix: if page is at /opencat/chat, API is at /opencat/v1/...
+const pathPrefix = location.pathname.replace(/\/chat\/?$/, "");
+const BASE = location.origin + pathPrefix;
 
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("input");

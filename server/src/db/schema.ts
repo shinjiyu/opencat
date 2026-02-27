@@ -1,47 +1,35 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const DB_PATH = process.env.DB_PATH ?? join(process.cwd(), "data", "portable.db");
+const DB_PATH = process.env.DB_PATH ?? join(process.cwd(), "data", "db.json");
 
-let _db: Database.Database | null = null;
-
-export function getDb(): Database.Database {
-  if (!_db) {
-    mkdirSync(dirname(DB_PATH), { recursive: true });
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-  }
-  return _db;
+export interface DbData {
+  tokens: Record<string, import("./tokens.js").TokenRecord>;
+  usage: Record<string, import("./tokens.js").UsageRecord>;
 }
 
-export function initDb(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tokens (
-      token          TEXT PRIMARY KEY,
-      status         TEXT NOT NULL DEFAULT 'active',
-      platform       TEXT NOT NULL,
-      install_id     TEXT NOT NULL,
-      version        TEXT,
-      daily_limit    INTEGER NOT NULL DEFAULT 100,
-      monthly_limit  INTEGER NOT NULL DEFAULT 3000,
-      meta           TEXT,
-      created_at     TEXT NOT NULL,
-      last_used_at   TEXT
-    );
+let _data: DbData | null = null;
 
-    CREATE TABLE IF NOT EXISTS usage (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      token             TEXT NOT NULL,
-      date              TEXT NOT NULL,
-      request_count     INTEGER NOT NULL DEFAULT 0,
-      prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-      completion_tokens INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(token, date),
-      FOREIGN KEY (token) REFERENCES tokens(token) ON DELETE CASCADE
-    );
+export function getDb(): DbData {
+  if (!_data) {
+    mkdirSync(dirname(DB_PATH), { recursive: true });
+    if (existsSync(DB_PATH)) {
+      _data = JSON.parse(readFileSync(DB_PATH, "utf-8"));
+    } else {
+      _data = { tokens: {}, usage: {} };
+      saveDb();
+    }
+  }
+  return _data!;
+}
 
-    CREATE INDEX IF NOT EXISTS idx_usage_token_date ON usage(token, date);
-  `);
+export function saveDb(): void {
+  if (!_data) return;
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+  writeFileSync(DB_PATH, JSON.stringify(_data, null, 2));
+}
+
+export function initDb(): void {
+  getDb();
+  console.log(`Database initialized at ${DB_PATH}`);
 }

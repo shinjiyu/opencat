@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type Database from "better-sqlite3";
-import { getDb } from "./schema.js";
+import { getDb, saveDb } from "./schema.js";
 
 export interface TokenRecord {
   token: string;
@@ -39,21 +38,7 @@ export function createToken(params: {
   const dailyLimit = Number(process.env.DEFAULT_DAILY_LIMIT ?? 100);
   const monthlyLimit = Number(process.env.DEFAULT_MONTHLY_LIMIT ?? 3000);
 
-  db.prepare(`
-    INSERT INTO tokens (token, platform, install_id, version, daily_limit, monthly_limit, meta, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    token,
-    params.platform,
-    params.install_id,
-    params.version ?? null,
-    dailyLimit,
-    monthlyLimit,
-    params.meta ? JSON.stringify(params.meta) : null,
-    now,
-  );
-
-  return {
+  const record: TokenRecord = {
     token,
     status: "active",
     platform: params.platform,
@@ -65,11 +50,14 @@ export function createToken(params: {
     created_at: now,
     last_used_at: null,
   };
+
+  db.tokens[token] = record;
+  saveDb();
+  return record;
 }
 
 export function findToken(token: string): TokenRecord | undefined {
-  const db = getDb();
-  return db.prepare("SELECT * FROM tokens WHERE token = ?").get(token) as TokenRecord | undefined;
+  return getDb().tokens[token];
 }
 
 export function updateToken(
@@ -77,34 +65,29 @@ export function updateToken(
   updates: { status?: string; daily_limit?: number; monthly_limit?: number },
 ): TokenRecord | undefined {
   const db = getDb();
-  const fields: string[] = [];
-  const values: unknown[] = [];
+  const record = db.tokens[token];
+  if (!record) return undefined;
 
-  if (updates.status !== undefined) {
-    fields.push("status = ?");
-    values.push(updates.status);
-  }
-  if (updates.daily_limit !== undefined) {
-    fields.push("daily_limit = ?");
-    values.push(updates.daily_limit);
-  }
-  if (updates.monthly_limit !== undefined) {
-    fields.push("monthly_limit = ?");
-    values.push(updates.monthly_limit);
-  }
+  if (updates.status !== undefined) record.status = updates.status;
+  if (updates.daily_limit !== undefined) record.daily_limit = updates.daily_limit;
+  if (updates.monthly_limit !== undefined) record.monthly_limit = updates.monthly_limit;
 
-  if (fields.length === 0) return findToken(token);
-
-  values.push(token);
-  db.prepare(`UPDATE tokens SET ${fields.join(", ")} WHERE token = ?`).run(...values);
-
-  return findToken(token);
+  saveDb();
+  return record;
 }
 
 export function deleteToken(token: string): boolean {
   const db = getDb();
-  const result = db.prepare("DELETE FROM tokens WHERE token = ?").run(token);
-  return result.changes > 0;
+  if (!db.tokens[token]) return false;
+  delete db.tokens[token];
+  // Clean up usage entries for this token
+  for (const key of Object.keys(db.usage)) {
+    if (key.startsWith(token + "|")) {
+      delete db.usage[key];
+    }
+  }
+  saveDb();
+  return true;
 }
 
 export function listTokens(params: {
@@ -113,31 +96,28 @@ export function listTokens(params: {
   status?: string;
 }): { tokens: TokenRecord[]; total: number } {
   const db = getDb();
+  let all = Object.values(db.tokens);
+
+  if (params.status) {
+    all = all.filter((t) => t.status === params.status);
+  }
+
+  all.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const total = all.length;
   const page = params.page ?? 1;
   const limit = params.limit ?? 20;
   const offset = (page - 1) * limit;
 
-  let where = "";
-  const whereValues: unknown[] = [];
-  if (params.status) {
-    where = "WHERE status = ?";
-    whereValues.push(params.status);
-  }
-
-  const total = (
-    db.prepare(`SELECT COUNT(*) as count FROM tokens ${where}`).get(...whereValues) as { count: number }
-  ).count;
-
-  const tokens = db
-    .prepare(`SELECT * FROM tokens ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-    .all(...whereValues, limit, offset) as TokenRecord[];
-
-  return { tokens, total };
+  return { tokens: all.slice(offset, offset + limit), total };
 }
 
 export function touchToken(token: string): void {
   const db = getDb();
-  db.prepare("UPDATE tokens SET last_used_at = ? WHERE token = ?").run(new Date().toISOString(), token);
+  if (db.tokens[token]) {
+    db.tokens[token].last_used_at = new Date().toISOString();
+    saveDb();
+  }
 }
 
 function todayUTC(): string {
@@ -149,25 +129,30 @@ function monthStartUTC(): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
+function usageKey(token: string, date: string): string {
+  return `${token}|${date}`;
+}
+
 export function getUsageToday(token: string): UsageRecord | undefined {
-  const db = getDb();
-  return db.prepare("SELECT * FROM usage WHERE token = ? AND date = ?").get(token, todayUTC()) as
-    | UsageRecord
-    | undefined;
+  return getDb().usage[usageKey(token, todayUTC())];
 }
 
 export function getUsageMonth(token: string): { request_count: number; prompt_tokens: number; completion_tokens: number } {
   const db = getDb();
   const start = monthStartUTC();
-  const result = db
-    .prepare(
-      `SELECT COALESCE(SUM(request_count), 0) as request_count,
-              COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-              COALESCE(SUM(completion_tokens), 0) as completion_tokens
-       FROM usage WHERE token = ? AND date >= ?`,
-    )
-    .get(token, start) as { request_count: number; prompt_tokens: number; completion_tokens: number };
-  return result;
+  let request_count = 0;
+  let prompt_tokens = 0;
+  let completion_tokens = 0;
+
+  for (const [key, record] of Object.entries(db.usage)) {
+    if (key.startsWith(token + "|") && record.date >= start) {
+      request_count += record.request_count;
+      prompt_tokens += record.prompt_tokens;
+      completion_tokens += record.completion_tokens;
+    }
+  }
+
+  return { request_count, prompt_tokens, completion_tokens };
 }
 
 export function incrementUsage(
@@ -177,13 +162,20 @@ export function incrementUsage(
 ): void {
   const db = getDb();
   const date = todayUTC();
+  const key = usageKey(token, date);
 
-  db.prepare(`
-    INSERT INTO usage (token, date, request_count, prompt_tokens, completion_tokens)
-    VALUES (?, ?, 1, ?, ?)
-    ON CONFLICT(token, date) DO UPDATE SET
-      request_count = request_count + 1,
-      prompt_tokens = prompt_tokens + excluded.prompt_tokens,
-      completion_tokens = completion_tokens + excluded.completion_tokens
-  `).run(token, date, promptTokens, completionTokens);
+  if (db.usage[key]) {
+    db.usage[key].request_count += 1;
+    db.usage[key].prompt_tokens += promptTokens;
+    db.usage[key].completion_tokens += completionTokens;
+  } else {
+    db.usage[key] = {
+      token,
+      date,
+      request_count: 1,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+    };
+  }
+  saveDb();
 }
