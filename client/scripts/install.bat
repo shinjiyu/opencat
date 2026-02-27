@@ -12,7 +12,7 @@ set "NPM=%SCRIPT_DIR%tools\node\npm.cmd"
 set "APP_DIR=%SCRIPT_DIR%lib\app"
 
 rem --- Server URL (injected at build time) ---
-set "SERVER_URL=https://proxy.example.com"
+set "SERVER_URL=https://kuroneko.chat/opencat"
 
 :: Check if already configured (pre-token mode)
 if exist "%APP_DIR%\opencat.json" (

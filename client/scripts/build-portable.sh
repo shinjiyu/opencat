@@ -18,7 +18,7 @@ PLATFORM=""
 NODE_VERSION="${NODE_VERSION:-22.14.0}"
 APP_PACKAGE="${APP_PACKAGE:-openclaw@2026.2.26}"
 OUT_DIR="$(pwd)/dist"
-SERVER_URL=""
+SERVER_URL="${SERVER_URL:-https://kuroneko.chat/opencat}"
 PRE_TOKEN=false
 
 ALL_PLATFORMS=(win-x64 darwin-arm64 darwin-x64 linux-x64)
@@ -40,7 +40,7 @@ if [[ -z "$PLATFORM" ]]; then
   exit 1
 fi
 if [[ -z "$SERVER_URL" ]]; then
-  echo "ERROR: --server-url is required (e.g. https://your-server.com)"
+  echo "ERROR: --server-url is required (e.g. https://kuroneko.chat/opencat)"
   exit 1
 fi
 

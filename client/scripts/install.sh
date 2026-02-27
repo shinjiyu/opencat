@@ -12,7 +12,7 @@ NPM="$SCRIPT_DIR/tools/node/bin/npm"
 APP_DIR="$SCRIPT_DIR/lib/app"
 
 # --- Server URL (injected at build time) ---
-SERVER_URL=${SERVER_URL:-https://proxy.example.com}
+SERVER_URL=${SERVER_URL:-https://kuroneko.chat/opencat}
 
 ARCH="$(uname -m)"
 OS="$(uname -s)"
