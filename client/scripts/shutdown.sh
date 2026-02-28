@@ -21,7 +21,7 @@ fi
 # ---------- Step 1: Deregister tunnel ----------
 
 if [[ -n "$TOKEN" && -n "$SERVER_BASE" ]]; then
-  echo "[1/3] Deregistering tunnel from server..."
+  echo "[1/4] Deregistering tunnel from server..."
   "$NODE" -e "
     const https = require('https');
     const http = require('http');
@@ -37,27 +37,41 @@ if [[ -n "$TOKEN" && -n "$SERVER_BASE" ]]; then
     req.on('error', e => console.error('    Error:', e.message));
     req.end();
   " "$SERVER_BASE" "$TOKEN" || true
-  echo "[1/3] Done."
+  echo "[1/4] Done."
 else
-  echo "[1/3] Skipped (no token or server config)."
+  echo "[1/4] Skipped (no token or server config)."
 fi
 echo
 
-# ---------- Step 2: Stop cloudflared ----------
+# ---------- Step 2: Stop Watchdog ----------
 
-echo "[2/3] Stopping cloudflared..."
+echo "[2/4] Stopping Watchdog..."
+WATCHDOG_PID=$(pgrep -f "startup\.sh" 2>/dev/null || true)
+if [[ -n "$WATCHDOG_PID" ]]; then
+  echo "    Killing Watchdog PID $WATCHDOG_PID"
+  kill $WATCHDOG_PID 2>/dev/null || true
+  echo "    Watchdog stopped."
+else
+  echo "    Watchdog is not running."
+fi
+echo "[2/4] Done."
+echo
+
+# ---------- Step 3: Stop cloudflared ----------
+
+echo "[3/4] Stopping cloudflared..."
 if pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
   pkill -f "cloudflared tunnel" 2>/dev/null || true
   echo "    cloudflared stopped."
 else
   echo "    cloudflared is not running."
 fi
-echo "[2/3] Done."
+echo "[3/4] Done."
 echo
 
-# ---------- Step 3: Stop OpenClaw ----------
+# ---------- Step 4: Stop OpenClaw ----------
 
-echo "[3/3] Stopping OpenClaw on port $OPENCLAW_PORT..."
+echo "[4/4] Stopping OpenClaw on port $OPENCLAW_PORT..."
 pid=$(lsof -ti :"$OPENCLAW_PORT" 2>/dev/null || true)
 if [[ -n "$pid" ]]; then
   echo "    Killing PID $pid"
@@ -66,7 +80,7 @@ if [[ -n "$pid" ]]; then
 else
   echo "    OpenClaw is not running on port $OPENCLAW_PORT."
 fi
-echo "[3/3] Done."
+echo "[4/4] Done."
 echo
 
 # ---------- Cleanup ----------
