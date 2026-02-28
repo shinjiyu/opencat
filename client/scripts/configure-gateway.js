@@ -10,8 +10,8 @@ const tokenPath = path.join(scriptDir, 'token.json');
 let c = {};
 try { c = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (e) {}
 
-// Gateway only reads ~/.openclaw/openclaw.json; bundle's lib/app/opencat.json is NOT loaded.
-// So we must write the Kuroneko proxy provider into user config from token.json.
+// Write Kuroneko proxy provider only on first run (when proxy provider doesn't exist yet).
+// If user has customized the proxy config, don't overwrite it on subsequent startups.
 let tokenJson = {};
 try { tokenJson = JSON.parse(fs.readFileSync(tokenPath, 'utf8')); } catch (e) {}
 const proxyBase = tokenJson.proxy_base_url || tokenJson.proxyBaseUrl || '';
@@ -19,12 +19,14 @@ const apiKey = tokenJson.token || '';
 if (proxyBase && apiKey) {
   if (!c.models) c.models = {};
   if (!c.models.providers) c.models.providers = {};
-  c.models.providers.proxy = {
-    baseUrl: proxyBase,
-    apiKey,
-    api: 'openai-completions',
-    models: [{ id: 'auto', name: 'Auto', reasoning: false, input: ['text'], contextWindow: 128000, maxTokens: 4096 }]
-  };
+  if (!c.models.providers.proxy) {
+    c.models.providers.proxy = {
+      baseUrl: proxyBase,
+      apiKey,
+      api: 'openai-completions',
+      models: [{ id: 'auto', name: 'Auto', reasoning: false, input: ['text'], contextWindow: 128000, maxTokens: 4096 }]
+    };
+  }
   if (c.models.mode !== 'replace') c.models.mode = 'merge';
 }
 
@@ -39,11 +41,10 @@ c.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
 c.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
 c.gateway.controlUi.allowInsecureAuth = true;
 
-// Prefer Kuroneko proxy for chat (faster than local Ollama 32B)
 if (!c.agents) c.agents = {};
 if (!c.agents.defaults) c.agents.defaults = {};
 if (!c.agents.defaults.model) c.agents.defaults.model = {};
-c.agents.defaults.model.primary = 'proxy/auto';
+if (!c.agents.defaults.model.primary) c.agents.defaults.model.primary = 'proxy/auto';
 
 fs.mkdirSync(path.dirname(configPath), { recursive: true });
 fs.writeFileSync(configPath, JSON.stringify(c, null, 2));
