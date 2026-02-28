@@ -10,17 +10,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODE="$SCRIPT_DIR/tools/node/bin/node"
 OPENCLAW_PORT="${OPENCLAW_PORT:-3080}"
 
-# Read token for tunnel deregistration
+# Tunnel registration always goes to Kuroneko (decoupled from LLM proxy config)
+REGISTRATION_BASE="https://kuroneko.chat/opencat"
+
+# Read token (for Bearer auth only)
 TOKEN=""
-SERVER_BASE=""
 if [[ -f "$SCRIPT_DIR/token.json" ]]; then
   TOKEN=$("$NODE" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(t.token)" "$SCRIPT_DIR/token.json" 2>/dev/null || true)
-  SERVER_BASE=$("$NODE" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const u=new URL(t.proxy_base_url);console.log(u.origin+u.pathname.replace(/\/v1\/?$/,''))" "$SCRIPT_DIR/token.json" 2>/dev/null || true)
 fi
 
 # ---------- Step 1: Deregister tunnel ----------
 
-if [[ -n "$TOKEN" && -n "$SERVER_BASE" ]]; then
+if [[ -n "$TOKEN" ]]; then
   echo "[1/4] Deregistering tunnel from server..."
   "$NODE" -e "
     const https = require('https');
@@ -36,10 +37,10 @@ if [[ -n "$TOKEN" && -n "$SERVER_BASE" ]]; then
     });
     req.on('error', e => console.error('    Error:', e.message));
     req.end();
-  " "$SERVER_BASE" "$TOKEN" || true
+  " "$REGISTRATION_BASE" "$TOKEN" || true
   echo "[1/4] Done."
 else
-  echo "[1/4] Skipped (no token or server config)."
+  echo "[1/4] Skipped (no token config)."
 fi
 echo
 

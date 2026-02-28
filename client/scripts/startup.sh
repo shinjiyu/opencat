@@ -19,9 +19,11 @@ OPENCLAW_LOG="$LOG_DIR/openclaw.log"
 WATCHDOG_LOG="$LOG_DIR/watchdog.log"
 WATCHDOG_INTERVAL=30
 
-# Read token config
+# Tunnel registration always goes to Kuroneko (decoupled from LLM proxy config)
+REGISTRATION_BASE="https://kuroneko.chat/opencat"
+
+# Read token (for Bearer auth only)
 TOKEN=$("$NODE" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(t.token)" "$SCRIPT_DIR/token.json")
-SERVER_BASE=$("$NODE" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const u=new URL(t.proxy_base_url);console.log(u.origin+u.pathname.replace(/\/v1\/?$/,''))" "$SCRIPT_DIR/token.json")
 
 if [[ -z "$TOKEN" ]]; then
   echo "ERROR: Could not read token from token.json"
@@ -74,7 +76,7 @@ register_tunnel() {
     req.on('error', e => console.error('    Error: ' + e.message));
     req.write(data);
     req.end();
-  " "$SERVER_BASE" "$tunnel_url" "$TOKEN"
+  " "$REGISTRATION_BASE" "$tunnel_url" "$TOKEN"
 }
 
 # ---------- Helper: start cloudflared and wait for URL ----------
@@ -169,7 +171,7 @@ if $HAS_TUNNEL; then
   echo "=========================================="
   echo
   echo "  OpenClaw (tunnel):    $TUNNEL_URL"
-  echo "  OpenClaw (redirect):  $SERVER_BASE/openclaw?token=$TOKEN"
+  echo "  OpenClaw (redirect):  $REGISTRATION_BASE/openclaw?token=$TOKEN"
   echo "  OpenClaw (local):     http://localhost:$OPENCLAW_PORT"
   echo
   echo "  Tunnel watchdog is active (every ${WATCHDOG_INTERVAL}s)."

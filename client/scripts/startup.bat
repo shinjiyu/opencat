@@ -18,12 +18,13 @@ set "OPENCLAW_LOG=%LOG_DIR%\openclaw.log"
 set "WATCHDOG_LOG=%LOG_DIR%\watchdog.log"
 set "WATCHDOG_INTERVAL=30"
 
-:: Read token config
+:: Tunnel registration always goes to Kuroneko (decoupled from LLM proxy config)
+set "REGISTRATION_BASE=https://kuroneko.chat/opencat"
+
+:: Read token (for Bearer auth only)
 set "TMP_OUT=%TEMP%\occ_%RANDOM%.tmp"
 "%NODE%" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(t.token)" "%SCRIPT_DIR%token.json" > "%TMP_OUT%"
 set /p TOKEN=<"%TMP_OUT%"
-"%NODE%" -e "const t=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const u=new URL(t.proxy_base_url);console.log(u.origin+u.pathname.replace(/\/v1\/?$/,''))" "%SCRIPT_DIR%token.json" > "%TMP_OUT%"
-set /p SERVER_BASE=<"%TMP_OUT%"
 del "%TMP_OUT%" >nul 2>&1
 
 if "!TOKEN!"=="" (
@@ -122,7 +123,7 @@ echo.
 :: ---------- Step 4: Register tunnel ----------
 
 echo [4/4] Registering tunnel with server...
-"%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){const r=JSON.parse(b);console.log('    OpenClaw URL: '+r.openclaw_url)}else{console.error('    Registration failed: '+b)}})});req.on('error',e=>console.error('    Error: '+e.message));req.write(d);req.end()" "!SERVER_BASE!" "!TUNNEL_URL!" "!TOKEN!"
+"%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){const r=JSON.parse(b);console.log('    OpenClaw URL: '+r.openclaw_url)}else{console.error('    Registration failed: '+b)}})});req.on('error',e=>console.error('    Error: '+e.message));req.write(d);req.end()" "!REGISTRATION_BASE!" "!TUNNEL_URL!" "!TOKEN!"
 echo [4/4] Done.
 echo.
 
@@ -131,7 +132,7 @@ echo   All services running
 echo ==========================================
 echo.
 echo   OpenClaw (tunnel):     !TUNNEL_URL!
-echo   OpenClaw (redirect):   !SERVER_BASE!/openclaw?token=!TOKEN!
+echo   OpenClaw (redirect):   !REGISTRATION_BASE!/openclaw?token=!TOKEN!
 echo   OpenClaw (local):      http://localhost:%OPENCLAW_PORT%
 echo.
 echo   This window is the Watchdog monitor.
@@ -220,5 +221,5 @@ set "TUNNEL_URL=!TUNNEL_URL:|=!"
 echo [Watchdog %time%] New tunnel: !TUNNEL_URL!
 echo [Watchdog %time%] New tunnel: !TUNNEL_URL! >> "%WATCHDOG_LOG%"
 
-"%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){console.log('[Watchdog] Re-registered OK')}else{console.error('[Watchdog] Failed: '+b)}})});req.on('error',e=>console.error('[Watchdog] Error: '+e.message));req.write(d);req.end()" "!SERVER_BASE!" "!TUNNEL_URL!" "!TOKEN!"
+"%NODE%" -e "const h=require('https');const u=new URL(process.argv[1]+'/api/tunnel');const d=JSON.stringify({tunnel_url:process.argv[2]});const req=h.request(u,{method:'PUT',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d),'Authorization':'Bearer '+process.argv[3]}},(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{if(res.statusCode===200){console.log('[Watchdog] Re-registered OK')}else{console.error('[Watchdog] Failed: '+b)}})});req.on('error',e=>console.error('[Watchdog] Error: '+e.message));req.write(d);req.end()" "!REGISTRATION_BASE!" "!TUNNEL_URL!" "!TOKEN!"
 goto :watchdog_loop
