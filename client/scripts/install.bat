@@ -38,15 +38,15 @@ if not exist "%NODE%" (
 
 :: ---------- Step 1: Check Node ----------
 
-echo [1/2] Checking Node...
-echo [1/2] Checking Node >> "%LOG_FILE%"
+echo [1/3] Checking Node...
+echo [1/3] Checking Node >> "%LOG_FILE%"
 "%NODE%" --version
 echo.
 
 :: ---------- Step 2: npm install ----------
 
-echo [2/2] Installing dependencies...
-echo [2/2] Installing dependencies >> "%LOG_FILE%"
+echo [2/3] Installing dependencies...
+echo [2/3] Installing dependencies >> "%LOG_FILE%"
 cd /d "%APP_DIR%"
 call "%NPM%" install --omit=dev --ignore-scripts
 set "NPM_ERR=!errorlevel!"
@@ -56,7 +56,20 @@ if !NPM_ERR! neq 0 (
     echo ERROR: npm install failed >> "%LOG_FILE%"
     pause & exit /b 1
 )
-echo [2/2] Done.
+echo [2/3] Done.
+echo.
+
+:: ---------- Step 3: First-run setup ----------
+
+echo [3/3] Configuring OpenClaw gateway (first-run setup)...
+echo [3/3] Configuring gateway >> "%LOG_FILE%"
+"%NODE%" "%SCRIPT_DIR%configure-gateway.js"
+if !errorlevel! neq 0 (
+    echo WARN: Gateway configuration failed. Check configure-gateway.js output.
+    echo WARN: configure-gateway failed >> "%LOG_FILE%"
+) else (
+    echo [3/3] Done.
+)
 echo.
 
 echo Install completed >> "%LOG_FILE%"

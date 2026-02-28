@@ -45,5 +45,6 @@ if (!c.agents.defaults) c.agents.defaults = {};
 if (!c.agents.defaults.model) c.agents.defaults.model = {};
 c.agents.defaults.model.primary = 'proxy/auto';
 
+fs.mkdirSync(path.dirname(configPath), { recursive: true });
 fs.writeFileSync(configPath, JSON.stringify(c, null, 2));
 console.log('OK');
